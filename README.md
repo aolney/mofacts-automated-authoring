@@ -1,4 +1,4 @@
-# MOFaCTS Automated Authoring
+# MoFaCTS Automated Authoring
 
 Overview TODO
 

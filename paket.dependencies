@@ -3,6 +3,7 @@ source https://nuget.org/api/v2
 storage:none
 
 
+nuget Fable.SimpleHttp
 nuget FSharp.Core >= 3.0
 nuget Fable.Core >= 3.0
 nuget Fable.Elmish.React >= 3.0
