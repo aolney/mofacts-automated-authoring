@@ -40,12 +40,20 @@ let randomFeature() = [1;2;3]
 // Domain
 // ---------------------------------------
 
+[<StringEnum>]
+type Service = 
+  | SRL
+  | Coreference
+  | DependencyParser
+
 type Model = 
   {
-    ///Input string to test the parser service
+    ///Input string to test the service
     InputText : string
-    ///Result from the parser service
-    ParseResult : string
+    ///Type of service we will call
+    Service : Service
+    ///Result from the service called
+    JsonResult : string
     ///Simple function to test fable imports into meteor
     SimpleFun : string
     Status : string
@@ -53,14 +61,16 @@ type Model =
 
 type Msg =
     | UpdateText of string
-    | ProcessText
-    | ParseResult of int * string
+    | CallService
+    | ServiceResult of int * string
+    | ServiceChange of Service
     // | ErrorResult of int * string
         
 let init () : Model * Cmd<Msg> =
   ( { 
-      InputText = ""
-      ParseResult = ""
+      InputText = "GitHub makes it easy to scale back on context switching."
+      Service = SRL
+      JsonResult = ""
       SimpleFun = ""
       Status = ""
     }, [] )
@@ -72,16 +82,27 @@ let update msg (model:Model) =
   match msg with
   | UpdateText(input) ->
     ( {model with InputText=input}, [])
-  | ProcessText ->
+  | CallService ->
+    //Test a simple function for meteor integration
     let simpleFun = Process.DoSimpleComputation model.InputText
+    //Test a service; we select here based on what's in the model
+    let service = 
+      match model.Service with
+      | SRL -> Process.GetSRL
+      | DependencyParser -> Process.GetParse
+      | Coreference -> Process.GetCoreference
+
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
       {model with SimpleFun=simpleFun; Status=""}, 
       //[]
-      Cmd.OfPromise.perform Process.GetParse model.InputText ( fun result -> result |> ParseResult )
+      Cmd.OfPromise.perform service model.InputText ( fun result -> result |> ServiceResult )
     )
-  | ParseResult(code,json)->
-    ( {model with ParseResult=json; Status=code.ToString()}, [])
+  | ServiceResult(code,json)->
+    ( {model with JsonResult=json; Status=code.ToString()}, [])
+  | ServiceChange(service) ->
+    ( {model with Service=service; Status=""}, [])
+
 
 // View
 // ---------------------------------------
@@ -118,9 +139,37 @@ let view model dispatch =
           ] []
         ]
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
+          Field.div [ ]
+                [ Label.label [ ]
+                    [ str "Service" ]
+                  Control.div [ ]
+                     [ Select.select [  ]
+                        [ select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ]
+                            [ option [ Value Service.SRL ] [ str "SRL Parse" ]
+                              option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
+                              option [ Value Service.Coreference ] [ str "Coreference" ] ] ] ] ]
+          // Field.div [] [
+          //   Dropdown.dropdown [ Dropdown.IsHoverable ]
+          //     [ div [ ]
+          //         [ Button.button [ ]
+          //             [ span [ ]
+          //                 [ str "Service Menu" ]
+          //               Icon.icon [ Icon.Size IsSmall ]
+          //                 [ Fa.i [ Fa.Solid.AngleDown ]
+          //                     [ ] ] ] ]
+          //       Dropdown.menu [ ]
+          //         [ Dropdown.content [ ]
+          //             [ Dropdown.Item.a [ ]
+          //                 [ str "SRL Parse" ]
+          //               Dropdown.Item.a [ ]
+          //                 [ str "Coreference" ]                                                                                                                                                                                                                 
+          //                 ] ] ]
+          // ]
+        ]
+        Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
           Button.button [ 
             Button.Color IsPrimary
-            Button.OnClick (fun _ -> dispatch ProcessText )
+            Button.OnClick (fun _ -> dispatch CallService )
             ] [ str "Get Results" ]
         ]
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
