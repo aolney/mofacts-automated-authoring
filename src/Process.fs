@@ -45,7 +45,7 @@ let endpoints =
     {
         SRL = "http://141.225.12.235:8000/predict/semantic-role-labeling"
         Coreference = "http://141.225.12.235:8000/predict/coreference-resolution"
-        DependencyParser = "http://141.225.12.235:8000/dependency-parsing"
+        DependencyParser = "http://141.225.12.235:8000/predict/dependency-parsing"
     }
 
 ///Function template for gets from AllenNLP. Requires on-campus IP address. We assume Promise will give better meteor compatibility

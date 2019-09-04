@@ -195,6 +195,9 @@ docs/tools/FSharp.Formatting.svclog
 *.bak
 project.lock.json
 
+#ionide junk
+.ionide/
+
 #project specific
 1-TODO/
 OLD/
