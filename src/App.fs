@@ -3,9 +3,9 @@ module App
 open Fable.Core
 open Fable.Core.JsInterop
 
-open Browser
-open Browser.Types
-open Browser.Url
+// open Browser
+// open Browser.Types
+// open Browser.Url
 
 open Elmish
 open Elmish.React
@@ -17,17 +17,17 @@ open Thoth.Json
 // open Elmish.Cmd
 
 open Fulma
-open Fable.FontAwesome
-open Fable.FontAwesome.Free
+// open Fable.FontAwesome
+// open Fable.FontAwesome.Free
 
-open Process
-open System.IO
-open Fable.Import
-open System.Runtime.CompilerServices
-open Fable.React.ReactiveComponents
-open Fable.Import
-open System.Text
-open System
+// open Process
+// open System.IO
+// open Fable.Import
+// open System.Runtime.CompilerServices
+// open Fable.React.ReactiveComponents
+// open Fable.Import
+// open System.Text
+// open System
 
 //Fable 2 transition
 let inline toJson x = Encode.Auto.toString(4, x)
@@ -45,6 +45,9 @@ type Service =
   | SRL
   | Coreference
   | DependencyParser
+  | SentenceSplitter
+  ///Composite service
+  | NLP 
 
 type Model = 
   {
@@ -69,7 +72,7 @@ type Msg =
 let init () : Model * Cmd<Msg> =
   ( { 
       InputText = "GitHub makes it easy to scale back on context switching."
-      Service = SRL
+      Service = NLP
       JsonResult = ""
       SimpleFun = ""
       Status = ""
@@ -89,8 +92,10 @@ let update msg (model:Model) =
     let service = 
       match model.Service with
       | SRL -> Process.GetSRL
-      | DependencyParser -> Process.GetParse
+      | DependencyParser -> Process.GetDependencyParse
       | Coreference -> Process.GetCoreference
+      | SentenceSplitter -> Process.GetSentences
+      | NLP -> Process.GetNLP
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -145,26 +150,13 @@ let view model dispatch =
                   Control.div [ ]
                      [ Select.select [  ]
                         [ select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ]
-                            [ option [ Value Service.SRL ] [ str "SRL Parse" ]
+                            [ 
+                              option [ Value Service.NLP ] [ str "Composite NLP" ]
+                              option [ Value Service.SRL ] [ str "SRL Parse" ]
                               option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
-                              option [ Value Service.Coreference ] [ str "Coreference" ] ] ] ] ]
-          // Field.div [] [
-          //   Dropdown.dropdown [ Dropdown.IsHoverable ]
-          //     [ div [ ]
-          //         [ Button.button [ ]
-          //             [ span [ ]
-          //                 [ str "Service Menu" ]
-          //               Icon.icon [ Icon.Size IsSmall ]
-          //                 [ Fa.i [ Fa.Solid.AngleDown ]
-          //                     [ ] ] ] ]
-          //       Dropdown.menu [ ]
-          //         [ Dropdown.content [ ]
-          //             [ Dropdown.Item.a [ ]
-          //                 [ str "SRL Parse" ]
-          //               Dropdown.Item.a [ ]
-          //                 [ str "Coreference" ]                                                                                                                                                                                                                 
-          //                 ] ] ]
-          // ]
+                              option [ Value Service.Coreference ] [ str "Coreference" ] 
+                              option [ Value Service.SentenceSplitter ] [ str "Sentence Splitter" ] 
+                            ] ] ] ]
         ]
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
           Button.button [ 
