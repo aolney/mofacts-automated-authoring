@@ -3,6 +3,7 @@ module Process
 open System
 open Fable.Core
 open Thoth.Json //for Json; might be cleaner way
+//TODO: possibly replace with this: https://github.com/thoth-org/Thoth.Fetch
 open Fable.SimpleHttp
 
 //Fable 2 transition
@@ -136,27 +137,24 @@ let GetSentences( input: string ) =
 ///Call services with sentences to generate a seq of promises; remap to promise of seq
 let GetForSentences (service: string -> JS.Promise<int*string>) (sentences:string[]) =
     sentences 
-    //NOTE: this throws away status
+    //TODO: this throws away status; use this? https://fsharpforfunandprofit.com/posts/recipe-part2/
     |> Seq.map( fun sentence -> sentence |> service  |> Promise.map snd) 
     |> Promise.all
 
 ///Call all NLP functions for a piece of text
 let GetNLP( input : string) =
-    // let sentencesPromise = input |> GetSentences
     promise {
         //start with a promise for sentences, throwing away status
         let! sentences = input |> GetSentences |> Promise.map( snd >> ofJson<string[]> )
         //call various services with sentences
         let! srlJsons = sentences |> GetForSentences GetSRL
         let! depJsons = sentences |> GetForSentences GetDependencyParse
-        // let! corJsons = sentences |> GetForSentences GetCoreference
         //construct the composite NLP object for each sentence
         let sentenceAnnotations = 
             seq {
                 for i = 0 to sentences.Length - 1 do
                     let srl = srlJsons.[i] |> ofJson<SRLResult>
                     let dep = depJsons.[i] |> ofJson<DependencyParseResult>
-                    // let cor = corJsons.[0] |> ofJson<CoreferenceResult>
                     yield { sen=sentences.[i] ; srl=srl; dep=dep }
             }
             |> Seq.toArray
@@ -166,25 +164,10 @@ let GetNLP( input : string) =
         let cor = corJson |> ofJson<CoreferenceResult>
 
         let documentAnnotation = { sentences=sentenceAnnotations; coreference=cor}
-        //old
-        // //for each nlp service that uses sentences get a per sentence result, throwing away status
-        // let nlpPromises = seq{ 
-        //     for sentence in sentences do
-        //         let srlJson = sentence |> GetSRL  |> Promise.map snd
-        //         yield srlJson
-        // } 
-        // //convert the sequence of promises to a promise of sequence and await
-        // let! result = nlpPromises |> Promise.all
+
         //return as json b/c our return type is string elsewhere
         return 1,documentAnnotation |> toJson 
     }
-    // sentence |> GetSRL  |> Promise.map snd
-    //     return sentencesJson |> ofJson<string[]>
-    // }
-    //map to promises for NLP annotations
-    // |> Promise.( fun sentence ->
-    //     GetSRL sentence
-    // )
 
 ///Reverse a string. Test of fable library imports
 let DoSimpleComputation( input : string ) =
