@@ -46,6 +46,8 @@ type Service =
   | Coreference
   | DependencyParser
   | SentenceSplitter
+  | CleanText
+  | Reverse
   ///Composite service
   | NLP 
 
@@ -57,8 +59,6 @@ type Model =
     Service : Service
     ///Result from the service called
     JsonResult : string
-    ///Simple function to test fable imports into meteor
-    SimpleFun : string
     Status : string
   }
 
@@ -74,7 +74,6 @@ let init () : Model * Cmd<Msg> =
       InputText = "GitHub makes it easy to scale back on context switching."
       Service = NLP
       JsonResult = ""
-      SimpleFun = ""
       Status = ""
     }, [] )
 
@@ -86,8 +85,6 @@ let update msg (model:Model) =
   | UpdateText(input) ->
     ( {model with InputText=input}, [])
   | CallService ->
-    //Test a simple function for meteor integration
-    let simpleFun = Process.DoSimpleComputation model.InputText
     //Test a service; we select here based on what's in the model
     let service = 
       match model.Service with
@@ -95,11 +92,13 @@ let update msg (model:Model) =
       | DependencyParser -> Process.GetDependencyParse
       | Coreference -> Process.GetCoreference
       | SentenceSplitter -> Process.GetSentences
+      | CleanText -> Process.CleanText >> Process.promisify
+      | Reverse -> Process.DoSimpleComputation >> Process.promisify
       | NLP -> Process.GetNLP
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
-      {model with SimpleFun=simpleFun; Status=""}, 
+      {model with Status=""}, 
       //[]
       Cmd.OfPromise.perform service model.InputText ( fun result -> result |> ServiceResult )
     )
@@ -156,6 +155,8 @@ let view model dispatch =
                               option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
                               option [ Value Service.Coreference ] [ str "Coreference" ] 
                               option [ Value Service.SentenceSplitter ] [ str "Sentence Splitter" ] 
+                              option [ Value Service.CleanText  ] [ str "Clean Text" ] 
+                              option [ Value Service.Reverse  ] [ str "Reverse" ] 
                             ] ] ] ]
         ]
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
