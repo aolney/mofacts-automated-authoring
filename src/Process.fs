@@ -104,6 +104,7 @@ type SentenceCoreference =
     }
 type SentenceAnnotation = 
     {
+        id : int
         sen : string
         srl : SRLResult
         dep : DependencyParseResult
@@ -114,6 +115,15 @@ type DocumentAnnotation =
     {
         sentences : SentenceAnnotation[]
         coreference : CoreferenceResult
+    }
+
+type Clozable =
+    {
+        words : string[]
+        start : int
+        stop : int
+        trace : ResizeArray<string>
+        prob : float
     }
 ///////////////////////////////////////////////////////////////////////
 /// REQUESTS
@@ -238,7 +248,7 @@ let GetNLP( input : string) =
                         | None -> ()
                     wordIndexOffset <- wordIndexOffset + srl.words.Length //all services should agree on tokens in sentence, so using srl here is arbitrary
 
-                    yield { sen=sentences.[i] ; srl=srl; dep=dep; cor={spans=spans.ToArray();clusters=clusters.ToArray()} }
+                    yield { id=i; sen=sentences.[i] ; srl=srl; dep=dep; cor={spans=spans.ToArray();clusters=clusters.ToArray()} }
             }
             |> Seq.toArray
 
@@ -255,16 +265,114 @@ let EstimateDesiredSentencesAndItems (sentences:string[] ) =
     let desiredItems = desiredSentences * 2
     desiredSentences,desiredItems
 
+/// Get weight of all chains in a sentence (add the lengths together)
+let GetTotalWeight da sen =
+    sen.cor.clusters 
+    |> Array.collect( fun id -> 
+        let cluster = da.coreference.clusters.[id]
+        cluster |> Array.map( fun c -> c.Length) 
+        )
+    |> Array.sum
+
+let GetClozable da sen =
+    let clozable = new ResizeArray<Clozable>()
+    //coref based cloze
+    clozable.AddRange(
+        sen.cor.spans
+        |> Seq.map( fun si -> 
+        { 
+            words = sen.srl.words.[ si.[0] .. si.[1] ]
+            start = si.[0] 
+            stop =  si.[1]
+            trace = ["coref"] |> ResizeArray
+            prob = 0.
+        }))
+    //syntactic subj/obj
+    clozable.AddRange(
+        sen.dep.predicted_dependencies
+        |> Seq.mapi( fun i x -> i,x)
+        |> Seq.filter( fun (i,d) -> d.Contains("obj") || d.Contains("subj") ) 
+        //must be noun or pronoun (catches edge cases of relative clauses)
+        |> Seq.filter( fun (i,d) -> sen.dep.pos.[i].StartsWith("N") || sen.dep.pos.[i] = "PRP" )
+        |> Seq.map( fun (i,d) -> 
+        { 
+            words = [| sen.dep.words.[i] |]
+            start = i 
+            stop =  i
+            trace = ["dep";d] |> ResizeArray
+            prob = 0.
+        }))
+    //srl
+    clozable.AddRange(
+        sen.srl.verbs
+        |> Seq.collect( fun pred ->
+            pred.tags 
+            |> Seq.mapi( fun i t -> i,t)
+            |> Seq.filter( fun (_,t) -> t.Contains("ARG") ) 
+            |> Seq.groupBy( fun (_,t) -> t.Split('-').[1])
+            |> Seq.map( fun (g,gtSeq) ->
+                let start = (gtSeq |> Seq.minBy fst) |> fst
+                let stop = (gtSeq |> Seq.maxBy fst) |> fst
+                { 
+                    words = sen.srl.words.[ start .. stop ]
+                    start = start
+                    stop =  stop
+                    trace = ["srl";pred.description] |> ResizeArray
+                    prob = 0.
+                }))) 
+    //remove overlapping cloze, preferring larger spans
+    //a starts before b, but they overlap
+    //b starts before a, but they overlap
+    //a entirely inside b
+    //b entirely inside a
+    //all covered with a.start < b.end && b.start < a.end;
+    let clozableStatic = clozable.ToArray()
+    for ci = 0 to clozableStatic.Length - 1 do
+        for cj = 0 to clozableStatic.Length - 1 do
+            let overlap =  ci <> cj && clozableStatic.[ci].start < clozableStatic.[cj].stop && clozableStatic.[cj].start < clozableStatic.[ci].stop
+            //keep the bigger one
+            if overlap && (clozableStatic.[ci].stop - clozableStatic.[ci].start) > (clozableStatic.[cj].stop - clozableStatic.[cj].start) then 
+                clozable.Remove( clozableStatic.[cj] ) |> ignore
+            elif overlap then
+                clozable.Remove( clozableStatic.[ci] ) |> ignore
+    //TODO score clozable by probability; see papers in tdf generation about handling prob for words outside our list
+    //
+    clozable
+
 ///Returns cloze items given a block of text. This is the most recent way but by no means the best way
 let GetCloze( input : string) =
     promise {
         let clozeAPIResult = {sentences=Array.empty;clozes=Array.empty}
-        let! nlp = input |> GetNLP |> Promise.map snd
+        let! nlp = input |> GetNLP |> Promise.map snd 
+        let da = nlp |> ofJson<DocumentAnnotation>
         //cloze:  We don't have the discourse parser yet, so we are only working with coref chains for the purpose of selecting sentences
         // for the moment we only care about #chains with length > 2 and total weight (chains*length) ()
         
         //TODO: open up Beaker and copy/paste here
+        let sentenceCount,itemCount = da.sentences |> Array.map( fun x -> x.sen) |> EstimateDesiredSentencesAndItems
+        
+        //hard filter: we exclude sentences that don't meet these criteria:
+        // 3 corefs with chain length > 2
+        //partition sentences into those meeting strict criteria and the rest
+        let hardFilterSentences,remainingSentences =
+            da.sentences
+            |> Array.toList
+            |> List.partition( fun sen ->
+                let chainsLength2OrMore = 
+                    sen.cor.clusters 
+                    |> Array.map( fun id -> da.coreference.clusters.[id])
+                    |> Array.filter( fun c -> c.Length > 1)
+                chainsLength2OrMore.Length > 2
+            )
+        let clozeSentences =
+            //if hard filter produced more than we need, sort by total weight and take what we need
+            if hardFilterSentences.Length > sentenceCount then
+                hardFilterSentences |> List.sortByDescending(  GetTotalWeight da ) |> List.take sentenceCount |> List.sortBy( fun s -> s.id )
+            else
+                hardFilterSentences @ (remainingSentences  |> List.sortByDescending(  GetTotalWeight da ) |> List.take (sentenceCount-hardFilterSentences.Length ) )
+                |> List.sortBy( fun s -> s.id )
 
+        //TODO get clozable, apply minRest logic for assigning items
         return 1, clozeAPIResult |> toJson
     }
 
