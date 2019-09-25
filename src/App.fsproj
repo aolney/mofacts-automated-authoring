@@ -3,7 +3,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Tasa5000.fs" />
+    <Compile Include="WordFrequency.fs" />
     <Compile Include="Process.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
