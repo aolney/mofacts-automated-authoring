@@ -3,10 +3,6 @@ module App
 open Fable.Core
 open Fable.Core.JsInterop
 
-// open Browser
-// open Browser.Types
-// open Browser.Url
-
 open Elmish
 open Elmish.React
 open Fable.React
@@ -14,20 +10,8 @@ open Fable.React.Props
 open Elmish.Debug
 open Elmish.HMR
 open Thoth.Json
-// open Elmish.Cmd
 
 open Fulma
-// open Fable.FontAwesome
-// open Fable.FontAwesome.Free
-
-// open Process
-// open System.IO
-// open Fable.Import
-// open System.Runtime.CompilerServices
-// open Fable.React.ReactiveComponents
-// open Fable.Import
-// open System.Text
-// open System
 
 //Fable 2 transition
 let inline toJson x = Encode.Auto.toString(4, x)
@@ -50,6 +34,8 @@ type Service =
   | Reverse
   ///Composite service
   | NLP 
+  | InternalAPI
+  | ExternalAPI
 
 type Model = 
   {
@@ -95,6 +81,8 @@ let update msg (model:Model) =
       | CleanText -> Process.CleanText >> Process.promisify
       | Reverse -> Process.DoSimpleComputation >> Process.promisify
       | NLP -> Process.GetNLP
+      | InternalAPI -> Process.GetClozeInternal
+      | ExternalAPI -> Process.GetClozeAPI
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -150,6 +138,8 @@ let view model dispatch =
                      [ Select.select [  ]
                         [ select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ]
                             [ 
+                              option [ Value Service.ExternalAPI ] [ str "External API" ]
+                              option [ Value Service.InternalAPI ] [ str "Internal API" ]
                               option [ Value Service.NLP ] [ str "Composite NLP" ]
                               option [ Value Service.SRL ] [ str "SRL Parse" ]
                               option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]

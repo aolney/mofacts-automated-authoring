@@ -1,6 +1,8 @@
 # MoFaCTS Automated Authoring
 
-Overview TODO
+Creates cloze items for improving reading comprehension. Extends [this previous work](https://olney.ai/category/2017/06/27/aiedcloze.html).
+
+Part of the [MoFaCTS project](https://github.com/memphis-iis/mofacts-ies).
 
 ------------------------------
 

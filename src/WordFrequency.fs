@@ -12,6 +12,6 @@ let Get( word : string ) =
     match wordFreqMap.TryFind( query ) with
     | Some( x ) -> x
     | None -> 
-        match lengthFreqMap.TryFind( query.length ) with
+        match lengthFreqMap.TryFind( query.Length ) with
         | Some(y) -> y
         | None -> lengthFreqMap.[25] //the rarest event we know

@@ -33,14 +33,14 @@ type Endpoints =
 ///////////////////////////////////////////////////////////////////////
 /// RESULTS
 
-type Sentence =
+type SentenceAPI =
   {
     sentence :  string
     itemId : int
     hasCloze : bool
   }
 
-type Cloze =
+type ClozableAPI =
   {
     cloze : string
     itemId : int
@@ -48,10 +48,10 @@ type Cloze =
     correctResponse : string
   }
 
-type ClozeAPIResult =
+type ClozeAPI =
   {
-    sentences : Sentence[]
-    clozes : Cloze[]
+    sentences : SentenceAPI[]
+    clozes : ClozableAPI[]
   }
 
 
@@ -274,7 +274,7 @@ let GetTotalWeight da sen =
         )
     |> Array.sum
 
-let GetClozable da sen =
+let GetClozable sen =
     let clozable = new ResizeArray<Clozable>()
     //coref based cloze
     clozable.AddRange(
@@ -285,7 +285,8 @@ let GetClozable da sen =
             start = si.[0] 
             stop =  si.[1]
             trace = ["coref"] |> ResizeArray
-            prob = 0.
+            //use the lowest freq word in the span
+            prob = sen.srl.words.[ si.[0] .. si.[1] ] |> Array.map WordFrequency.Get |> Array.min
         }))
     //syntactic subj/obj
     clozable.AddRange(
@@ -300,7 +301,9 @@ let GetClozable da sen =
             start = i 
             stop =  i
             trace = ["dep";d] |> ResizeArray
-            prob = 0.
+            //use the lowest freq word in the span
+            prob = [| sen.dep.words.[i] |] |> Array.map WordFrequency.Get |> Array.min
+
         }))
     //srl
     clozable.AddRange(
@@ -318,7 +321,8 @@ let GetClozable da sen =
                     start = start
                     stop =  stop
                     trace = ["srl";pred.description] |> ResizeArray
-                    prob = 0.
+                    //use the lowest freq word in the span
+                    prob = sen.srl.words.[ start .. stop ] |> Array.map WordFrequency.Get |> Array.min
                 }))) 
     //remove overlapping cloze, preferring larger spans
     //a starts before b, but they overlap
@@ -335,24 +339,22 @@ let GetClozable da sen =
                 clozable.Remove( clozableStatic.[cj] ) |> ignore
             elif overlap then
                 clozable.Remove( clozableStatic.[ci] ) |> ignore
-    //TODO score clozable by probability; see papers in tdf generation about handling prob for words outside our list
-    //
+
     clozable
 
 ///Returns cloze items given a block of text. This is the most recent way but by no means the best way
-let GetCloze( input : string) =
+let GetClozeInternal( input : string) =
     promise {
-        let clozeAPIResult = {sentences=Array.empty;clozes=Array.empty}
         let! nlp = input |> GetNLP |> Promise.map snd 
         let da = nlp |> ofJson<DocumentAnnotation>
-        //cloze:  We don't have the discourse parser yet, so we are only working with coref chains for the purpose of selecting sentences
-        // for the moment we only care about #chains with length > 2 and total weight (chains*length) ()
-        
-        //TODO: open up Beaker and copy/paste here
+
+        //Estimate how many items we want
         let sentenceCount,itemCount = da.sentences |> Array.map( fun x -> x.sen) |> EstimateDesiredSentencesAndItems
         
         //hard filter: we exclude sentences that don't meet these criteria:
         // 3 corefs with chain length > 2
+        // TODO: We don't have the discourse parser yet, so we can't apply the "sentence contains nucleus" constraint
+
         //partition sentences into those meeting strict criteria and the rest
         let hardFilterSentences,remainingSentences =
             da.sentences
@@ -372,8 +374,71 @@ let GetCloze( input : string) =
                 hardFilterSentences @ (remainingSentences  |> List.sortByDescending(  GetTotalWeight da ) |> List.take (sentenceCount-hardFilterSentences.Length ) )
                 |> List.sortBy( fun s -> s.id )
 
-        //TODO get clozable, apply minRest logic for assigning items
-        return 1, clozeAPIResult |> toJson
+        //Intermediate output before we convert to API format
+        let clozeResultDictionary = new System.Collections.Generic.Dictionary<SentenceAnnotation,ResizeArray<Clozable>>()
+        let AddClozable key item =
+            if not <| clozeResultDictionary.ContainsKey(key) then
+                clozeResultDictionary.Add(key, ResizeArray<Clozable>() )
+            clozeResultDictionary.[key].Add(item)
+
+        //We need to generate the desired # items BUT we also must take at least 1 from each sentence
+        //Pass 1: Occurs inside. Take the lowest freq to make item for a sentence; add remaining items to list
+        //Pass 2: take N-sent lowest freq from remainder list
+        let restList =
+            clozeSentences
+            |> List.collect( fun sa -> 
+                let clozables = sa |> GetClozable |> Seq.sortByDescending( fun c -> c.prob ) |> Seq.toList
+                //make min items so each sentence has 1 item
+                AddClozable sa clozables.Head
+                //sentence, remaining clozables; flatten/inflate
+                clozables.Tail |> List.map( fun c -> sa,c)
+            )
+
+        //make remaining items
+        restList
+        |> List.sortBy( fun (_,c) -> c.prob )
+        |> List.take (itemCount - sentenceCount) //bc we already took sentenceCount worth: we took the min of each sentence
+        |> List.iter( fun (sa,c) -> AddClozable sa c )
+
+        //Add all sentences we are NOT using as well; they have null for clozables
+        da.sentences
+        |> Array.iter( fun sen ->
+            if not <| clozeResultDictionary.ContainsKey(sen) then
+                clozeResultDictionary.Add( sen, null )
+        )
+
+        return 1, clozeResultDictionary |> toJson
+    }
+
+/// Return an item as a sentence with words blanked out, together with the corresponding words
+let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
+    let itemWords = Array.copy sa.srl.words
+    for i = cl.start to cl.stop do
+        itemWords.[i] <- "__________"
+    itemWords |> String.concat " ", cl.words |> String.concat " "
+
+/// Public facing API. Calls the internal function and then wraps result in API format
+let GetClozeAPI (input : string) = 
+    promise{
+        let! clozeInternal = input |> GetClozeInternal |> Promise.map snd 
+        let clozeResultDictionary = clozeInternal |> ofJson<System.Collections.Generic.Dictionary<SentenceAnnotation,ResizeArray<Clozable>>>
+
+        let sentences = ResizeArray<SentenceAPI>()
+        let clozes = ResizeArray<ClozableAPI>()
+
+        clozeResultDictionary.Keys 
+        |> Seq.sortBy( fun sa -> sa.id ) //not sure if sorted order is needed/assumed
+        |> Seq.iter( fun sa ->
+            match clozeResultDictionary.[sa] with
+            | null -> sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = false} )
+            | clozables -> 
+                sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
+                clozables |> Seq.iter( fun cl ->
+                    let cloze,correctResponse = MakeItem sa cl
+                    clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash clozables; correctResponse = correctResponse} )
+                )
+            )
+        return 1, {sentences=sentences.ToArray();clozes=clozes.ToArray()} |> toJson
     }
 
 ///Reverse a string. Test of fable library imports
