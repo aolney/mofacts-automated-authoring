@@ -196,7 +196,9 @@ let GetForSentences (service: string -> JS.Promise<int*string>) (sentences:strin
 let RegexReplace (pattern : string) (replacement:string) (input:string) =
     System.Text.RegularExpressions.Regex.Replace( input, pattern, replacement )
     
-///Per sentence text cleaning
+let Split ( pattern : char ) (input: string) = input.Split( pattern 
+)
+///Per sentence text cleaning. NOTE regexes are A&P specific!
 let CleanText input =
     input 
     |> RegexReplace "Page[ 0-9]+" ""
@@ -208,6 +210,35 @@ let CleanText input =
     |> RegexReplace " \.$" "." //replacements leave spaces before final period
     |> transliteration.transliterate
 
+/// Finds acronyms in parentheses and tries to map to nearby words. Makes strong assumptions / not highly general
+let GetAcronymMap input =
+    //assumes all acronyms are caps only and bounded by parentheses. NOTE: used named group at first but gave up when it didn't work
+    let acronymRegex = System.Text.RegularExpressions.Regex( "\(([A-Z]+)\)" )
+    let matches = acronymRegex.Matches( input )
+    let acronymMap = 
+        if matches.Count <> 0 then
+            seq {
+                for m in matches |> Seq.cast<System.Text.RegularExpressions.Match> do
+                    let acronym = m.Groups.[1].Value
+                    let index = m.Index //group index (m.Groups.[1].Index) not implemented in fable; m.Index OK because match almost identical to group
+                    //get the words before the acronym
+                    let start = if index - 50 > 0 then index - 50 else 0
+                    let words = input.Substring( start, 50 ) |> Split ' '
+                    //convert words to a string of their first letters and search for acronym in it
+                    let firstLetterString = words |> Array.map( fun w -> w.[0] ) |> String
+                    let letterRegex = System.Text.RegularExpressions.Regex( acronym )
+                    let lm = letterRegex.Match( firstLetterString.ToUpper() )
+                    //if we find a match then return the corresponding phrase and acronym
+                    if lm.Success then
+                        let phrase = words.[ lm.Index .. acronym.Length ] |> String.concat " "
+                        yield phrase,acronym
+                        yield acronym,phrase
+            }
+            |> Map.ofSeq
+        else
+            Map.empty
+    //
+    acronymMap |> toJson
 
 ///Call all NLP functions for a piece of text
 let GetNLP( input : string) =
@@ -262,7 +293,6 @@ let GetNLP( input : string) =
 ///Based on the Heart Study
 let EstimateDesiredSentencesAndItems (sentences:string[] ) =
     let wordCount = sentences |> Seq.sumBy( fun sentence -> sentence.Split(' ').Length ) |> float
-    //TODO: DEBUG ONLY
     let desiredSentences = 2 //(wordCount / 1000.0) * 25.0 |> int
     let desiredItems = desiredSentences * 2
     desiredSentences,desiredItems
@@ -276,37 +306,71 @@ let GetTotalWeight da sen =
         )
     |> Array.sum
 
+/// Returns a Clozable for a modified NP given a sentence annotation and span of interest
+let GetModifiedNPClozable sen startInit stopInit head traceInit =
+    let trace = ResizeArray<string>()
+    trace.AddRange(traceInit)
+    //this is a pseudohead of the span. we can't use real heads because stanford dependencies aren't universal dependencies
+    //therefore we must allow for functional/exocentric heads but find the pseudohead approximating universal dependencies 
+    let h =
+        match head with
+        | Some(x) -> x
+        | None -> 
+            let stanfordHead = 
+                [|  startInit .. stopInit |] 
+                //get the predicted heads for each index; predicted heads are 1 indexed (root is 0)
+                |> Seq.map( fun i -> i,sen.dep.predicted_heads.[i])
+                //find tuple with a predicted head outside the span (because English is projective)
+                |> Seq.find( fun (_,h) -> h < startInit + 1 || h > stopInit + 1 )
+                //return the index
+                |> fst
+            //require nominal pseudohead if stanfordHead is not nominal
+            if sen.dep.pos.[ stanfordHead ].StartsWith("NN") |> not then
+                trace.Add( "head is not nominal")
+                //get subj/obj dependencies, take first
+                let argOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.predicted_dependencies.[i]) |> Seq.tryFind( fun (_,h) -> h.Contains("subj") || h.Contains("obj")) 
+                //get nominal words, take last
+                let nnOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.pos.[i]) |> Seq.rev |> Seq.tryFind( fun (_,h) -> h.StartsWith("NN")) 
+                match argOption,nnOption with
+                | Some(arg),_ ->  trace.Add( "WARNING: using first syntactic arg as pseudohead"); arg |> fst
+                | _, Some(nn) -> trace.Add( "WARNING: using last nominal as pseudohead"); nn |> fst
+                | _,_ -> trace.Add( "CRITICAL: clozable without nominal or arg, defaulting to given span"); stopInit
+            else
+                stanfordHead
+    //take preceeding modifiers of the nominal pseudohead that are nounish or JJ 
+    let indices = [| startInit .. h |] |> Array.rev |> Array.takeWhile( fun i -> sen.dep.pos.[i].StartsWith("N") || sen.dep.pos.[i] =  "JJ" ) |> Array.rev
+    let start = indices.[0]
+    let stop = indices |> Array.last
+    let words = sen.srl.words.[ start .. stop ]
+    let clozable = 
+        { 
+            words = words
+            start = start
+            stop =  stop
+            trace = trace.ToArray()
+            //use the lowest freq word in the span
+            prob = words |> Array.map WordFrequency.Get |> Array.min
+        }
+    //
+    clozable
+
+/// GetClozable items for a sentence using syntactic, srl, and coref information. TODO: filter non subj/obj/mod
 let GetClozable sen =
     let clozable = new ResizeArray<Clozable>()
     //coref based cloze
-    clozable.AddRange(
-        sen.cor.spans
-        |> Seq.map( fun si -> 
-        { 
-            words = sen.srl.words.[ si.[0] .. si.[1] ]
-            start = si.[0] 
-            stop =  si.[1]
-            trace = [| "coref" |] //|> ResizeArray
-            //use the lowest freq word in the span
-            prob = sen.srl.words.[ si.[0] .. si.[1] ] |> Array.map WordFrequency.Get |> Array.min
-        }))
+    clozable.AddRange( 
+        sen.cor.spans 
+        |> Seq.map( fun si -> GetModifiedNPClozable sen si.[0] si.[1] None [| "coref" |] )
+    )
     //syntactic subj/obj
     clozable.AddRange(
         sen.dep.predicted_dependencies
         |> Seq.mapi( fun i x -> i,x)
-        |> Seq.filter( fun (i,d) -> d.Contains("obj") || d.Contains("subj") ) 
-        //must be noun or pronoun (catches edge cases of relative clauses)
-        |> Seq.filter( fun (i,d) -> sen.dep.pos.[i].StartsWith("N") || sen.dep.pos.[i] = "PRP" )
-        |> Seq.map( fun (i,d) -> 
-        { 
-            words = [| sen.dep.words.[i] |]
-            start = i 
-            stop =  i
-            trace = [| "dep";d |] //|> ResizeArray
-            //use the lowest freq word in the span
-            prob = [| sen.dep.words.[i] |] |> Array.map WordFrequency.Get |> Array.min
-
-        }))
+        |> Seq.filter( fun (i,d) -> d.Contains("obj") || d.Contains("subj") || d.Contains("root") ) //root for copula constructions
+        //must be noun (catches edge cases of relative clauses) TODO: allow pronoun if resolved to referent
+        |> Seq.filter( fun (i,d) -> sen.dep.pos.[i].StartsWith("N") ) // || sen.dep.pos.[i] = "PRP" )
+        |> Seq.map( fun (i,d) -> GetModifiedNPClozable sen i i (i|>Some) [| "dep";d |] )
+    )
     //srl
     clozable.AddRange(
         sen.srl.verbs
@@ -314,18 +378,13 @@ let GetClozable sen =
             pred.tags 
             |> Seq.mapi( fun i t -> i,t)
             |> Seq.filter( fun (_,t) -> t.Contains("ARG") ) 
-            |> Seq.groupBy( fun (_,t) -> t.Split('-').[1])
+            |> Seq.groupBy( fun (_,t) -> t.Split('-').[1]) //e.g. I-ARG0, so group by ARG0
             |> Seq.map( fun (g,gtSeq) ->
                 let start = (gtSeq |> Seq.minBy fst) |> fst
                 let stop = (gtSeq |> Seq.maxBy fst) |> fst
-                { 
-                    words = sen.srl.words.[ start .. stop ]
-                    start = start
-                    stop =  stop
-                    trace = [| "srl";pred.description |] //|> ResizeArray
-                    //use the lowest freq word in the span
-                    prob = sen.srl.words.[ start .. stop ] |> Array.map WordFrequency.Get |> Array.min
-                }))) 
+                GetModifiedNPClozable sen start stop None [| "srl";pred.description |])
+        )
+    )
     //remove overlapping cloze, preferring larger spans
     //a starts before b, but they overlap
     //b starts before a, but they overlap
@@ -341,7 +400,7 @@ let GetClozable sen =
                 clozable.Remove( clozableStatic.[cj] ) |> ignore
             elif overlap then
                 clozable.Remove( clozableStatic.[ci] ) |> ignore
-
+    //
     clozable
 
 ///Returns cloze items given a block of text. This is the most recent way but by no means the best way
@@ -431,6 +490,7 @@ let GetClozeAPI (input : string) =
     promise{
         let! clozeInternal = input |> GetClozeInternal |> Promise.map snd 
         let clozeResultDictionary = clozeInternal |> ofJson<Map<SentenceAnnotation,Clozable[]>>
+        let acronymMap = input |> GetAcronymMap |> ofJson<Map<string,string>>
 
         let sentences = ResizeArray<SentenceAPI>()
         let clozes = ResizeArray<ClozableAPI>()
@@ -447,7 +507,12 @@ let GetClozeAPI (input : string) =
                 sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
                 clozables |> Seq.iter( fun cl ->
                     let cloze,correctResponse = MakeItem sa cl
-                    clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash clozables; correctResponse = correctResponse} )
+                    //insert any alternative correct responses here
+                    let correctResponses = 
+                        match acronymMap.TryFind(correctResponse) with
+                        | Some( acronym ) -> correctResponse + "|" + acronym
+                        | None -> correctResponse
+                    clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash clozables; correctResponse = correctResponses} )
                 )
             )
         return 1, {sentences=sentences.ToArray();clozes=clozes.ToArray()} |> toJson

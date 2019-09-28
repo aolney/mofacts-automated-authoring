@@ -31,6 +31,7 @@ type Service =
   | DependencyParser
   | SentenceSplitter
   | CleanText
+  | Acronym
   | Reverse
   ///Composite service
   | NLP 
@@ -82,6 +83,7 @@ let update msg (model:Model) =
       | Coreference -> Process.GetCoreference
       | SentenceSplitter -> Process.GetSentences
       | CleanText -> Process.CleanText >> Process.promisify
+      | Acronym -> Process.GetAcronymMap >> Process.promisify
       | Reverse -> Process.DoSimpleComputation >> Process.promisify
       | NLP -> Process.GetNLP
       | InternalAPI -> Process.GetClozeInternal
@@ -149,6 +151,7 @@ let view model dispatch =
                               option [ Value Service.Coreference ] [ str "Coreference" ] 
                               option [ Value Service.SentenceSplitter ] [ str "Sentence Splitter" ] 
                               option [ Value Service.CleanText  ] [ str "Clean Text" ] 
+                              option [ Value Service.Acronym  ] [ str "Acronym" ] 
                               option [ Value Service.Reverse  ] [ str "Reverse" ] 
                             ] ] ] ]
         ]
