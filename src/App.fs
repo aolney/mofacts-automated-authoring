@@ -3,6 +3,8 @@ module App
 open Fable.Core
 open Fable.Core.JsInterop
 
+open Browser
+
 open Elmish
 open Elmish.React
 open Fable.React
@@ -44,9 +46,10 @@ type Model =
     InputText : string
     ///Type of service we will call
     Service : Service
+    ///Status of service call; typically standard HTTP code
+    Status : string
     ///Result from the service called
     JsonResult : string
-    Status : string
   }
 
 type Msg =
@@ -54,19 +57,21 @@ type Msg =
     | CallService
     | ServiceResult of int * string
     | ServiceChange of Service
+    | DownloadJson
     // | ErrorResult of int * string
         
 let init () : Model * Cmd<Msg> =
   ( { 
       InputText = "GitHub makes it easy to scale back on context switching."
       Service = InternalAPI
-      JsonResult = ""
       Status = ""
+      JsonResult = ""
     }, [] )
 
 
 // Update
 // ---------------------------------------
+
 let update msg (model:Model) =
   match msg with
   | UpdateText(input) ->
@@ -99,7 +104,15 @@ let update msg (model:Model) =
     ( {model with JsonResult=json; Status=code.ToString()}, [])
   | ServiceChange(service) ->
     ( {model with Service=service; Status=""}, [])
-
+  | DownloadJson ->
+      let a = document.createElement("a") :?> Browser.Types.HTMLLinkElement
+      //May need blobs for larger sizes
+      //a.href <- URL.createObjectURL( blob );
+      a.href <- "data:text/plain;charset=utf-8," + JS.encodeURIComponent( model.JsonResult )
+      let filename = System.DateTime.Now.ToString("MM-dd-yy-HH-mm", System.Globalization.CultureInfo.InvariantCulture) + ".json"
+      a.setAttribute("download", filename );
+      a.click()
+      ( model,[] )
 
 // View
 // ---------------------------------------
@@ -123,7 +136,7 @@ let view model dispatch =
       //editing 
       Fulma.Columns.columns [] [        
         Fulma.Column.column [ Column.Width  (Screen.All, Column.IsThreeFifths )  ] [
-          str "Text"
+          Label.label [ ] [ str "Input" ]
           textarea [
             ClassName "input"
             Value model.InputText
@@ -154,16 +167,26 @@ let view model dispatch =
                               option [ Value Service.Acronym  ] [ str "Acronym" ] 
                               option [ Value Service.Reverse  ] [ str "Reverse" ] 
                             ] ] ] ]
-        ]
-        Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
           Button.button [ 
             Button.Color IsPrimary
             Button.OnClick (fun _ -> dispatch CallService )
             ] [ str "Get Results" ]
         ]
+        // Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
+        //   Button.button [ 
+        //     Button.Color IsPrimary
+        //     Button.OnClick (fun _ -> dispatch CallService )
+        //     ] [ str "Get Results" ]
+        // ]
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
+          Label.label [ ] [ str "Model State" ]
+          Button.button [ 
+            Button.Color IsPrimary
+            Button.OnClick (fun _ -> dispatch DownloadJson )
+            ] [ str "Download JSON" ]
           //debuggy but also generally useful
-          pre [  Style [FontSize 10.0 ] ] [ str (model |> toJson) ]
+          pre [  Style [FontSize 10.0 ] ] [  str <| (model |> toJson).Replace("\\n","\n").Replace("\\\"","\"") ]
+          //span [  Style [FontSize 10.0; WhiteSpace "pre-wrap"] ] [  str <| (model |> toJson).Replace("\\n","\n").Replace("\\\"","\"") ]
         ]
       ]
     ]  

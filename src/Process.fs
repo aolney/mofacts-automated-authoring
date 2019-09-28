@@ -293,7 +293,7 @@ let GetNLP( input : string) =
 ///Based on the Heart Study
 let EstimateDesiredSentencesAndItems (sentences:string[] ) =
     let wordCount = sentences |> Seq.sumBy( fun sentence -> sentence.Split(' ').Length ) |> float
-    let desiredSentences = 2 //(wordCount / 1000.0) * 25.0 |> int
+    let desiredSentences = (wordCount / 1000.0) * 25.0 |> int //
     let desiredItems = desiredSentences * 2
     desiredSentences,desiredItems
 
@@ -403,6 +403,9 @@ let GetClozable sen =
     //
     clozable
 
+///To throw away sentences we don't know how to handle
+let badSentenceRegex = System.Text.RegularExpressions.Regex( "(figure|table|section|clinical|application)\s+[0-9]",Text.RegularExpressions.RegexOptions.IgnoreCase)
+
 ///Returns cloze items given a block of text. This is the most recent way but by no means the best way
 let GetClozeInternal( input : string) =
     promise {
@@ -419,6 +422,8 @@ let GetClozeInternal( input : string) =
         //partition sentences into those meeting strict criteria and the rest
         let hardFilterSentences,remainingSentences =
             da.sentences
+            //Filter sentences we don't know how to handle (A&P specific)
+            |> Array.filter( fun sa -> sa.sen |> badSentenceRegex.IsMatch |> not )
             |> Array.toList
             |> List.partition( fun sen ->
                 let chainsLength2OrMore = 
