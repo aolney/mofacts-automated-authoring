@@ -10,6 +10,7 @@ open Fable.SimpleHttp
 //Fable 2 transition 
 let inline toJson x = Encode.Auto.toString(4, x)
 let inline ofJson<'T> json = Decode.Auto.unsafeFromString<'T>(json)
+
 //for faking return types
 let promisify ( input:string ) =
     promise{ return 1,input}
@@ -122,7 +123,7 @@ type Clozable =
         words : string[]
         start : int
         stop : int
-        trace : ResizeArray<string>
+        trace : string[]
         prob : float
     }
 ///////////////////////////////////////////////////////////////////////
@@ -261,7 +262,8 @@ let GetNLP( input : string) =
 ///Based on the Heart Study
 let EstimateDesiredSentencesAndItems (sentences:string[] ) =
     let wordCount = sentences |> Seq.sumBy( fun sentence -> sentence.Split(' ').Length ) |> float
-    let desiredSentences = (wordCount / 1000.0) * 25.0 |> int
+    //TODO: DEBUG ONLY
+    let desiredSentences = 2 //(wordCount / 1000.0) * 25.0 |> int
     let desiredItems = desiredSentences * 2
     desiredSentences,desiredItems
 
@@ -284,7 +286,7 @@ let GetClozable sen =
             words = sen.srl.words.[ si.[0] .. si.[1] ]
             start = si.[0] 
             stop =  si.[1]
-            trace = ["coref"] |> ResizeArray
+            trace = [| "coref" |] //|> ResizeArray
             //use the lowest freq word in the span
             prob = sen.srl.words.[ si.[0] .. si.[1] ] |> Array.map WordFrequency.Get |> Array.min
         }))
@@ -300,7 +302,7 @@ let GetClozable sen =
             words = [| sen.dep.words.[i] |]
             start = i 
             stop =  i
-            trace = ["dep";d] |> ResizeArray
+            trace = [| "dep";d |] //|> ResizeArray
             //use the lowest freq word in the span
             prob = [| sen.dep.words.[i] |] |> Array.map WordFrequency.Get |> Array.min
 
@@ -320,7 +322,7 @@ let GetClozable sen =
                     words = sen.srl.words.[ start .. stop ]
                     start = start
                     stop =  stop
-                    trace = ["srl";pred.description] |> ResizeArray
+                    trace = [| "srl";pred.description |] //|> ResizeArray
                     //use the lowest freq word in the span
                     prob = sen.srl.words.[ start .. stop ] |> Array.map WordFrequency.Get |> Array.min
                 }))) 
@@ -374,12 +376,18 @@ let GetClozeInternal( input : string) =
                 hardFilterSentences @ (remainingSentences  |> List.sortByDescending(  GetTotalWeight da ) |> List.take (sentenceCount-hardFilterSentences.Length ) )
                 |> List.sortBy( fun s -> s.id )
 
-        //Intermediate output before we convert to API format
+        //Internal output; has more information than we'd push through public API
         let clozeResultDictionary = new System.Collections.Generic.Dictionary<SentenceAnnotation,ResizeArray<Clozable>>()
         let AddClozable key item =
             if not <| clozeResultDictionary.ContainsKey(key) then
                 clozeResultDictionary.Add(key, ResizeArray<Clozable>() )
             clozeResultDictionary.[key].Add(item)
+        //Auto json serialization seems to fail for our generic types (or possibly nulls?); convert here
+        let GetResultJson() =
+            clozeResultDictionary
+            |> Seq.map ( fun (KeyValue(sa, ra)) -> sa, if ra <> null then ra.ToArray() else Array.empty )
+            |> Map.ofSeq
+            |> toJson
 
         //We need to generate the desired # items BUT we also must take at least 1 from each sentence
         //Pass 1: Occurs inside. Take the lowest freq to make item for a sentence; add remaining items to list
@@ -407,7 +415,8 @@ let GetClozeInternal( input : string) =
                 clozeResultDictionary.Add( sen, null )
         )
 
-        return 1, clozeResultDictionary |> toJson
+        //return 1, clozeResultDictionary |> toJson //gives Thoth serialization errors; suspect generics in nested types are problem
+        return 1, GetResultJson()
     }
 
 /// Return an item as a sentence with words blanked out, together with the corresponding words
@@ -421,17 +430,20 @@ let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
 let GetClozeAPI (input : string) = 
     promise{
         let! clozeInternal = input |> GetClozeInternal |> Promise.map snd 
-        let clozeResultDictionary = clozeInternal |> ofJson<System.Collections.Generic.Dictionary<SentenceAnnotation,ResizeArray<Clozable>>>
+        let clozeResultDictionary = clozeInternal |> ofJson<Map<SentenceAnnotation,Clozable[]>>
 
         let sentences = ResizeArray<SentenceAPI>()
         let clozes = ResizeArray<ClozableAPI>()
 
-        clozeResultDictionary.Keys 
-        |> Seq.sortBy( fun sa -> sa.id ) //not sure if sorted order is needed/assumed
-        |> Seq.iter( fun sa ->
-            match clozeResultDictionary.[sa] with
-            | null -> sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = false} )
-            | clozables -> 
+        //clozeResultDictionary.Keys
+        clozeResultDictionary
+        |> Map.toSeq
+        |> Seq.sortBy( fun (sa,cl) -> sa.id ) //not sure if sorted order is needed/assumed
+        |> Seq.iter( fun (sa,clozables) ->
+            match clozables.Length with
+            //no clozables for this sentence
+            | 0 -> sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = false} )
+            | _ -> 
                 sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
                 clozables |> Seq.iter( fun cl ->
                     let cloze,correctResponse = MakeItem sa cl

@@ -58,7 +58,7 @@ type Msg =
 let init () : Model * Cmd<Msg> =
   ( { 
       InputText = "GitHub makes it easy to scale back on context switching."
-      Service = NLP
+      Service = InternalAPI
       JsonResult = ""
       Status = ""
     }, [] )
@@ -71,6 +71,9 @@ let update msg (model:Model) =
   | UpdateText(input) ->
     ( {model with InputText=input}, [])
   | CallService ->
+    //Debug site
+    let test = [| "1"; "a" |] |> toJson
+
     //Test a service; we select here based on what's in the model
     let service = 
       match model.Service with
