@@ -14,6 +14,7 @@ open Elmish.HMR
 open Thoth.Json
 
 open Fulma
+open Fable.FontAwesome
 
 //Fable 2 transition
 let inline toJson x = Encode.Auto.toString(4, x)
@@ -50,6 +51,8 @@ type Model =
     Status : string
     ///Result from the service called
     JsonResult : string
+    ///Json loaded from file
+    JsonInput : string option
   }
 
 type Msg =
@@ -58,6 +61,9 @@ type Msg =
     | ServiceResult of int * string
     | ServiceChange of Service
     | DownloadJson
+    | LoadParseFile of Browser.Types.FileList
+    | SetParseJson of string
+    | ClearParse
     // | ErrorResult of int * string
         
 let init () : Model * Cmd<Msg> =
@@ -66,6 +72,7 @@ let init () : Model * Cmd<Msg> =
       Service = InternalAPI
       Status = ""
       JsonResult = ""
+      JsonInput = None
     }, [] )
 
 
@@ -87,12 +94,12 @@ let update msg (model:Model) =
       | DependencyParser -> Process.GetDependencyParse
       | Coreference -> Process.GetCoreference
       | SentenceSplitter -> Process.GetSentences
-      | CleanText -> Process.CleanText >> Process.promisify
-      | Acronym -> Process.GetAcronymMap >> Process.promisify
-      | Reverse -> Process.DoSimpleComputation >> Process.promisify
+      | CleanText -> Process.CleanText >> Process.Promisify
+      | Acronym -> Process.GetAcronymMap >> Process.Promisify
+      | Reverse -> Process.DoSimpleComputation >> Process.Promisify
       | NLP -> Process.GetNLP
-      | InternalAPI -> Process.GetClozeInternal
-      | ExternalAPI -> Process.GetClozeAPI
+      | InternalAPI -> Process.GetClozeInternal model.JsonInput
+      | ExternalAPI -> Process.GetClozeAPI model.JsonInput
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -106,13 +113,24 @@ let update msg (model:Model) =
     ( {model with Service=service; Status=""}, [])
   | DownloadJson ->
       let a = document.createElement("a") :?> Browser.Types.HTMLLinkElement
-      //May need blobs for larger sizes
-      //a.href <- URL.createObjectURL( blob );
-      a.href <- "data:text/plain;charset=utf-8," + JS.encodeURIComponent( model.JsonResult )
+      //need blobs for larger sizes
+      let blob = Blob.Create( [| model.JsonResult |], jsOptions<Types.BlobPropertyBag>( fun o -> o.``type`` <- "data:text/plain;charset=utf-8") )
+      a.href <- URL.createObjectURL( blob );
+      //a.href <- "data:text/plain;charset=utf-8," + JS.encodeURIComponent( model.JsonResult )
       let filename = System.DateTime.Now.ToString("MM-dd-yy-HH-mm", System.Globalization.CultureInfo.InvariantCulture) + ".json"
       a.setAttribute("download", filename );
       a.click()
       ( model,[] )
+  | LoadParseFile(fileList) -> 
+      let fileReadCommand dispatch =
+        let fileReader = Browser.Dom.FileReader.Create ()
+        fileReader.onload <- fun _ -> fileReader.result |> unbox<string> |> SetParseJson |> dispatch
+        fileReader.readAsText fileList.[0]
+      ( model, [fileReadCommand] )
+  | SetParseJson(json) ->
+    ( { model with JsonInput = Some(json)}, [])
+  | ClearParse ->
+    ( { model with JsonResult = ""; JsonInput = None}, [] )
 
 // View
 // ---------------------------------------
@@ -133,7 +151,7 @@ let view model dispatch =
       Content.content [ ] [
         p [] [ str "This is a simple app for developing automated authoring components for MoFaCTS. Click on the cat in the corner for more information." ]
       ]
-      //editing 
+      //editing and uploading data
       Fulma.Columns.columns [] [        
         Fulma.Column.column [ Column.Width  (Screen.All, Column.IsThreeFifths )  ] [
           Label.label [ ] [ str "Input" ]
@@ -147,7 +165,29 @@ let view model dispatch =
             ] 
             OnChange (fun ev ->  !!ev.target?value |> UpdateText|> dispatch )
           ] []
+          Fulma.File.file [ 
+              Fulma.File.HasName 
+              //Key allows us to reload a file after clearing it
+              Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadParseFile !!ev.target?files  |> dispatch ) ] 
+              ] [ 
+              Fulma.File.label [ ] [ 
+                Fulma.File.input [ Props [ Accept ".json" ]]
+                Fulma.File.cta [ ] [ 
+                  Fulma.File.icon [ ] [ 
+                    Icon.icon [ ] [ 
+                      Fa.i [ Fa.Solid.Upload ] []
+                      ]
+                  ]
+                  Fulma.File.label [ ] [ str "Load Parse" ] ]
+                Fulma.File.name [ ] [ str (match model.JsonInput with | Some(_) -> "Status: Loaded" | None -> "Status: Empty" ) ] 
+                Button.button [ 
+                  Button.Color IsPrimary
+                  Button.OnClick (fun _ -> dispatch ClearParse )
+                  ] [ str "Clear Parse" ]
+              ] 
+            ] 
         ]
+        //Select and run service
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
           Field.div [ ]
                 [ Label.label [ ]
@@ -172,12 +212,7 @@ let view model dispatch =
             Button.OnClick (fun _ -> dispatch CallService )
             ] [ str "Get Results" ]
         ]
-        // Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
-        //   Button.button [ 
-        //     Button.Color IsPrimary
-        //     Button.OnClick (fun _ -> dispatch CallService )
-        //     ] [ str "Get Results" ]
-        // ]
+        // View model state and get results
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
           Label.label [ ] [ str "Model State" ]
           Button.button [ 

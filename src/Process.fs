@@ -11,8 +11,8 @@ open Fable.SimpleHttp
 let inline toJson x = Encode.Auto.toString(4, x)
 let inline ofJson<'T> json = Decode.Auto.unsafeFromString<'T>(json)
 
-//for faking return types
-let promisify ( input:string ) =
+/// Fake a promise return type 
+let Promisify ( input:string ) =
     promise{ return 1,input}
 
 //Import node transliteration
@@ -126,6 +126,18 @@ type Clozable =
         trace : string[]
         prob : float
     }
+    /// A custom decoder allows precise json decoding errors to be reported
+    static member Decoder : Thoth.Json.Decoder<Clozable>=
+        Decode.object
+            ( fun get ->
+                {
+                    words = get.Required.Field "words" (Decode.array Decode.string)
+                    start = get.Required.Field "start" Decode.int
+                    stop = get.Required.Field "stop" Decode.int
+                    trace = get.Required.Field "trace" (Decode.array Decode.string)
+                    prob = get.Required.Field "prob" Decode.float
+                }
+            )
 ///////////////////////////////////////////////////////////////////////
 /// REQUESTS
 
@@ -244,8 +256,9 @@ let GetAcronymMap input =
 let GetNLP( input : string) =
     promise {
         //start with a promise for sentences, throwing away status
-        let! rawSentences = input |> GetSentences |> Promise.map( snd >> ofJson<string[]> )
-        let sentences = rawSentences |> Array.map CleanText
+        let! rawSentences = input |> GetSentences  |> Promise.map( snd >> ofJson<string[]> )
+        //Clean "junk" from text; this can blank out sentences, so we filter those
+        let sentences = rawSentences |> Array.map CleanText |> Array.filter( fun sen -> sen.Length > 0 )
 
         //call global services not requiring sentences; note we reformat cleaned sentences to solid text for this
         let! corJson = sentences |> String.concat " " |> GetCoreference |> Promise.map snd
@@ -310,49 +323,63 @@ let GetTotalWeight da sen =
 let GetModifiedNPClozable sen startInit stopInit head traceInit =
     let trace = ResizeArray<string>()
     trace.AddRange(traceInit)
-    //this is a pseudohead of the span. we can't use real heads because stanford dependencies aren't universal dependencies
-    //therefore we must allow for functional/exocentric heads but find the pseudohead approximating universal dependencies 
-    let h =
-        match head with
-        | Some(x) -> x
-        | None -> 
-            let stanfordHead = 
-                [|  startInit .. stopInit |] 
-                //get the predicted heads for each index; predicted heads are 1 indexed (root is 0)
-                |> Seq.map( fun i -> i,sen.dep.predicted_heads.[i])
-                //find tuple with a predicted head outside the span (because English is projective)
-                |> Seq.find( fun (_,h) -> h < startInit + 1 || h > stopInit + 1 )
-                //return the index
-                |> fst
-            //require nominal pseudohead if stanfordHead is not nominal
-            if sen.dep.pos.[ stanfordHead ].StartsWith("NN") |> not then
-                trace.Add( "head is not nominal")
-                //get subj/obj dependencies, take first
-                let argOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.predicted_dependencies.[i]) |> Seq.tryFind( fun (_,h) -> h.Contains("subj") || h.Contains("obj")) 
-                //get nominal words, take last
-                let nnOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.pos.[i]) |> Seq.rev |> Seq.tryFind( fun (_,h) -> h.StartsWith("NN")) 
-                match argOption,nnOption with
-                | Some(arg),_ ->  trace.Add( "WARNING: using first syntactic arg as pseudohead"); arg |> fst
-                | _, Some(nn) -> trace.Add( "WARNING: using last nominal as pseudohead"); nn |> fst
-                | _,_ -> trace.Add( "CRITICAL: clozable without nominal or arg, defaulting to given span"); stopInit
+
+    //check for insanity first. return empty if insane
+    if startInit < 0 || stopInit >= sen.srl.words.Length then //|| head < 0 || head >= sen.srl.words.Length then
+        trace.Add("CRITICAL: invalid clozable parameters for " + (sen |> toJson ) )
+        { words=Array.empty; start=0; stop=0; trace=trace.ToArray() ; prob = 1.0 }
+    else
+        //this is a pseudohead of the span. we can't use real heads because stanford dependencies aren't universal dependencies
+        //therefore we must allow for functional/exocentric heads but find the pseudohead approximating universal dependencies 
+        let h =
+            match head with
+            | Some(x) -> x
+            | None -> 
+                let stanfordHead = 
+                    [|  startInit .. stopInit |] 
+                    //get the predicted heads for each index; predicted heads are 1 indexed (root is 0)
+                    |> Seq.map( fun i -> i,sen.dep.predicted_heads.[i])
+                    //find tuple with a predicted head outside the span (because English is projective)
+                    |> Seq.find( fun (_,h) -> h < startInit + 1 || h > stopInit + 1 )
+                    //return the index
+                    |> fst
+                //require nominal pseudohead if stanfordHead is not nominal
+                if sen.dep.pos.[ stanfordHead ].StartsWith("NN") |> not then
+                    trace.Add( "head is not nominal")
+                    //debug
+                    // if sen.id > 140 then
+                    //     printfn "debug"
+                    //get subj/obj dependencies, take first
+                    let argOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.predicted_dependencies.[i]) |> Seq.tryFind( fun (_,h) -> h.Contains("subj") || h.Contains("obj")) 
+                    //get nominal words, take last
+                    let nnOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.pos.[i]) |> Seq.rev |> Seq.tryFind( fun (_,h) -> h.StartsWith("NN")) 
+                    match argOption,nnOption with
+                    | Some(arg),_ ->  trace.Add( "WARNING: using first syntactic arg as pseudohead"); arg |> fst
+                    | _, Some(nn) -> trace.Add( "WARNING: using last nominal as pseudohead"); nn |> fst
+                    | _,_ -> trace.Add( "CRITICAL: clozable without nominal or arg, defaulting to given span"); stopInit
+                else
+                    stanfordHead
+        //take preceeding modifiers of the nominal pseudohead that are nounish or JJ 
+        let indices = [| startInit .. h |] |> Array.rev |> Array.takeWhile( fun i -> sen.dep.pos.[i].StartsWith("N") || sen.dep.pos.[i] =  "JJ" ) |> Array.rev
+        let start, stop, words = 
+            if indices.Length <> 0 then
+                let start = indices.[0]
+                let stop = indices |> Array.last
+                start, stop, sen.srl.words.[ start .. stop ]
             else
-                stanfordHead
-    //take preceeding modifiers of the nominal pseudohead that are nounish or JJ 
-    let indices = [| startInit .. h |] |> Array.rev |> Array.takeWhile( fun i -> sen.dep.pos.[i].StartsWith("N") || sen.dep.pos.[i] =  "JJ" ) |> Array.rev
-    let start = indices.[0]
-    let stop = indices |> Array.last
-    let words = sen.srl.words.[ start .. stop ]
-    let clozable = 
-        { 
-            words = words
-            start = start
-            stop =  stop
-            trace = trace.ToArray()
-            //use the lowest freq word in the span
-            prob = words |> Array.map WordFrequency.Get |> Array.min
-        }
-    //
-    clozable
+                trace.Add("CRITICAL: stanford head yields empty span, defaulting to given span")
+                startInit, stopInit, sen.srl.words.[ startInit .. stopInit ]
+        let clozable = 
+            { 
+                words = words
+                start = start
+                stop =  stop
+                trace = trace.ToArray()
+                //use the lowest freq word in the span
+                prob = words |> Array.map WordFrequency.Get |> Array.min
+            }
+        //
+        clozable
 
 /// GetClozable items for a sentence using syntactic, srl, and coref information. TODO: filter non subj/obj/mod
 let GetClozable sen =
@@ -406,10 +433,13 @@ let GetClozable sen =
 ///To throw away sentences we don't know how to handle
 let badSentenceRegex = System.Text.RegularExpressions.Regex( "(figure|table|section|clinical|application)\s+[0-9]",Text.RegularExpressions.RegexOptions.IgnoreCase)
 
-///Returns cloze items given a block of text. This is the most recent way but by no means the best way
-let GetClozeInternal( input : string) =
+///Returns cloze items given a block of text and an optional JSON of DocumentAnnotation
+let GetClozeInternal (nlpJsonOption: string option) ( input : string ) =
     promise {
-        let! nlp = input |> GetNLP |> Promise.map snd 
+        let! nlp = 
+            match nlpJsonOption with
+            | Some(nlpJson) -> nlpJson |> Promisify |> Promise.map snd 
+            | None -> input |> GetNLP |> Promise.map snd 
         let da = nlp |> ofJson<DocumentAnnotation>
 
         //Estimate how many items we want
@@ -480,6 +510,7 @@ let GetClozeInternal( input : string) =
         )
 
         //return 1, clozeResultDictionary |> toJson //gives Thoth serialization errors; suspect generics in nested types are problem
+        // let result = GetResultJson() 
         return 1, GetResultJson()
     }
 
@@ -491,9 +522,17 @@ let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
     itemWords |> String.concat " ", cl.words |> String.concat " "
 
 /// Public facing API. Calls the internal function and then wraps result in API format
-let GetClozeAPI (input : string) = 
+let GetClozeAPI (nlpOption: string option) (input : string) = 
     promise{
-        let! clozeInternal = input |> GetClozeInternal |> Promise.map snd 
+        let! clozeInternal = input |> GetClozeInternal nlpOption |> Promise.map snd
+        
+        //Debug: TODO better error handling
+        // let decodeResult = clozeInternal |> Decode.Auto.fromString<Map<SentenceAnnotation,Clozable[]>>
+        // let clozeResultDictionary = 
+        //     match decodeResult with
+        //     | Ok res -> res
+        //     | Error e -> Map.empty<SentenceAnnotation,Clozable[]>
+
         let clozeResultDictionary = clozeInternal |> ofJson<Map<SentenceAnnotation,Clozable[]>>
         let acronymMap = input |> GetAcronymMap |> ofJson<Map<string,string>>
 
