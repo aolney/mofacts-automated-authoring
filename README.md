@@ -2,7 +2,9 @@
 
 Creates cloze items for improving reading comprehension. Extends [this previous work](https://olney.ai/category/2017/06/27/aiedcloze.html).
 
-Part of the [MoFaCTS project](https://github.com/memphis-iis/mofacts-ies).
+The GUI is intended for testing purposes rather than for end-users. The underlying components are intended for the [MoFaCTS project](https://github.com/memphis-iis/mofacts-ies), which has its own interface.
+
+[A live demo of the test GUI is here](https://olney.ai/mofacts-automated-authoring/), but NLP services won't work unless you are on the University of Memphis campus. 
 
 ------------------------------
 

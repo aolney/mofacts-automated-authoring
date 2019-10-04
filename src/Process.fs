@@ -34,6 +34,7 @@ type Endpoints =
 ///////////////////////////////////////////////////////////////////////
 /// RESULTS
 
+///Public sentence component of an item
 type SentenceAPI =
   {
     sentence :  string
@@ -41,6 +42,7 @@ type SentenceAPI =
     hasCloze : bool
   }
 
+///Public clozable component of an item
 type ClozableAPI =
   {
     cloze : string
@@ -49,19 +51,22 @@ type ClozableAPI =
     correctResponse : string
   }
 
+///Public API for items
 type ClozeAPI =
   {
     sentences : SentenceAPI[]
     clozes : ClozableAPI[]
   }
 
-
+///AllenNLP SRL verb
 type SRLVerb =
     {
         verb : string
         description : string
         tags : string[]
     }
+
+///AllenNLP SRL result
 type SRLResult =
     {
         words : string[]
@@ -75,6 +80,7 @@ type SRLResult =
 //         text : string
 //     }
 
+///AllenNLP dependency parse result
 type DependencyParseResult =
     {
         arc_loss : float
@@ -88,6 +94,7 @@ type DependencyParseResult =
         words : string[]
     }
 
+///AllenNLP coreference result. At the document level only.
 type CoreferenceResult =
     {
         clusters : int[][][]
@@ -96,6 +103,7 @@ type CoreferenceResult =
         top_spans : int[][]
     }
 
+///Coreference information remaped to the sentence level
 type SentenceCoreference =
     {
         ///start/stop word in sentence normalized to sentence indices
@@ -103,6 +111,8 @@ type SentenceCoreference =
         ///id of chain; maps to CoreferenceResult clusters
         clusters : int[]
     }
+
+///Sentence level annotation combining  annotations from all NLP services
 type SentenceAnnotation = 
     {
         id : int
@@ -112,12 +122,14 @@ type SentenceAnnotation =
         cor : SentenceCoreference
     }
 
+///Document level annotation combining annotations from all NLP services
 type DocumentAnnotation = 
     {
         sentences : SentenceAnnotation[]
         coreference : CoreferenceResult
     }
 
+///A clozable we have generated
 type Clozable =
     {
         words : string[]
@@ -138,6 +150,15 @@ type Clozable =
                     prob = get.Required.Field "prob" Decode.float
                 }
             )
+
+///All data we have collected and will use for final creation of cloze items
+type InternalAPI =
+    {
+        sentences : SentenceAnnotation[]
+        coreference : CoreferenceResult
+        clozables : Clozable[][]
+    }
+
 ///////////////////////////////////////////////////////////////////////
 /// REQUESTS
 
@@ -159,6 +180,7 @@ type TextRequest =
         model : string
     }
 
+///Endpoints for NLP services
 let endpoints =
     {
         SRL = "http://141.225.12.235:8000/predict/semantic-role-labeling"
@@ -256,9 +278,9 @@ let GetAcronymMap input =
 let GetNLP( input : string) =
     promise {
         //start with a promise for sentences, throwing away status
-        let! rawSentences = input |> GetSentences  |> Promise.map( snd >> ofJson<string[]> )
+        let! sentences = input |> CleanText|> GetSentences  |> Promise.map( snd >> ofJson<string[]> )
         //Clean "junk" from text; this can blank out sentences, so we filter those
-        let sentences = rawSentences |> Array.map CleanText |> Array.filter( fun sen -> sen.Length > 0 )
+        //let sentences = rawSentences |> Array.map CleanText |> Array.filter( fun sen -> sen.Length > 0 )
 
         //call global services not requiring sentences; note we reformat cleaned sentences to solid text for this
         let! corJson = sentences |> String.concat " " |> GetCoreference |> Promise.map snd
@@ -304,11 +326,14 @@ let GetNLP( input : string) =
     }
 
 ///Based on the Heart Study
-let EstimateDesiredSentencesAndItems (sentences:string[] ) =
+let EstimateDesiredSentences (sentences:string[] ) =
     let wordCount = sentences |> Seq.sumBy( fun sentence -> sentence.Split(' ').Length ) |> float
     let desiredSentences = (wordCount / 1000.0) * 25.0 |> int //
+    desiredSentences
+///Based on the Heart Study
+let EstimateDesiredItems desiredSentences =
     let desiredItems = desiredSentences * 2
-    desiredSentences,desiredItems
+    desiredItems
 
 /// Get weight of all chains in a sentence (add the lengths together)
 let GetTotalWeight da sen =
@@ -405,114 +430,53 @@ let GetClozable sen =
             pred.tags 
             |> Seq.mapi( fun i t -> i,t)
             |> Seq.filter( fun (_,t) -> t.Contains("ARG") ) 
-            |> Seq.groupBy( fun (_,t) -> t.Split('-').[1]) //e.g. I-ARG0, so group by ARG0
+            |> Seq.groupBy( fun (_,t) -> t.Substring(2)) //e.g. I-ARG0, so group by ARG0; we don't split b/c there are multiple hyphens
             |> Seq.map( fun (g,gtSeq) ->
                 let start = (gtSeq |> Seq.minBy fst) |> fst
                 let stop = (gtSeq |> Seq.maxBy fst) |> fst
                 GetModifiedNPClozable sen start stop None [| "srl";pred.description |])
         )
     )
-    //remove overlapping cloze, preferring larger spans
-    //a starts before b, but they overlap
-    //b starts before a, but they overlap
-    //a entirely inside b
-    //b entirely inside a
-    //all covered with a.start < b.end && b.start < a.end;
-    let clozableStatic = clozable.ToArray()
-    for ci = 0 to clozableStatic.Length - 1 do
-        for cj = 0 to clozableStatic.Length - 1 do
-            let overlap =  ci <> cj && clozableStatic.[ci].start < clozableStatic.[cj].stop && clozableStatic.[cj].start < clozableStatic.[ci].stop
-            //keep the bigger one
-            if overlap && (clozableStatic.[ci].stop - clozableStatic.[ci].start) > (clozableStatic.[cj].stop - clozableStatic.[cj].start) then 
-                clozable.Remove( clozableStatic.[cj] ) |> ignore
-            elif overlap then
-                clozable.Remove( clozableStatic.[ci] ) |> ignore
-    //
+
     clozable
 
 ///To throw away sentences we don't know how to handle
 let badSentenceRegex = System.Text.RegularExpressions.Regex( "(figure|table|section|clinical|application)\s+[0-9]",Text.RegularExpressions.RegexOptions.IgnoreCase)
 
 ///Returns cloze items given a block of text and an optional JSON of DocumentAnnotation
-let GetClozeInternal (nlpJsonOption: string option) ( input : string ) =
+let GetInternalAPI (nlpJsonOption: string option) ( input : string ) =
     promise {
+        //Get a DocumentAnnotation if one wasn't passed in
         let! nlp = 
             match nlpJsonOption with
             | Some(nlpJson) -> nlpJson |> Promisify |> Promise.map snd 
             | None -> input |> GetNLP |> Promise.map snd 
         let da = nlp |> ofJson<DocumentAnnotation>
 
-        //Estimate how many items we want
-        let sentenceCount,itemCount = da.sentences |> Array.map( fun x -> x.sen) |> EstimateDesiredSentencesAndItems
-        
-        //hard filter: we exclude sentences that don't meet these criteria:
-        // 3 corefs with chain length > 2
-        // TODO: We don't have the discourse parser yet, so we can't apply the "sentence contains nucleus" constraint
+        //Make clozables for every sentence (not efficient, but useful for research)
+        let clozables = da.sentences |> Array.map GetClozable |> Array.map( fun ra -> ra.ToArray() )
 
-        //partition sentences into those meeting strict criteria and the rest
-        let hardFilterSentences,remainingSentences =
-            da.sentences
-            //Filter sentences we don't know how to handle (A&P specific)
-            |> Array.filter( fun sa -> sa.sen |> badSentenceRegex.IsMatch |> not )
-            |> Array.toList
-            |> List.partition( fun sen ->
-                let chainsLength2OrMore = 
-                    sen.cor.clusters 
-                    |> Array.map( fun id -> da.coreference.clusters.[id])
-                    |> Array.filter( fun c -> c.Length > 1)
-                chainsLength2OrMore.Length > 2
-            )
-        let clozeSentences =
-            //if hard filter produced more than we need, sort by total weight and take what we need
-            if hardFilterSentences.Length > sentenceCount then
-                hardFilterSentences |> List.sortByDescending(  GetTotalWeight da ) |> List.take sentenceCount |> List.sortBy( fun s -> s.id )
-            else
-                hardFilterSentences @ (remainingSentences  |> List.sortByDescending(  GetTotalWeight da ) |> List.take (sentenceCount-hardFilterSentences.Length ) )
-                |> List.sortBy( fun s -> s.id )
-
-        //Internal output; has more information than we'd push through public API
-        let clozeResultDictionary = new System.Collections.Generic.Dictionary<SentenceAnnotation,ResizeArray<Clozable>>()
-        let AddClozable key item =
-            if not <| clozeResultDictionary.ContainsKey(key) then
-                clozeResultDictionary.Add(key, ResizeArray<Clozable>() )
-            clozeResultDictionary.[key].Add(item)
-        //Auto json serialization seems to fail for our generic types (or possibly nulls?); convert here
-        let GetResultJson() =
-            clozeResultDictionary
-            |> Seq.map ( fun (KeyValue(sa, ra)) -> sa, if ra <> null then ra.ToArray() else Array.empty )
-            |> Map.ofSeq
-            |> toJson
-
-        //We need to generate the desired # items BUT we also must take at least 1 from each sentence
-        //Pass 1: Occurs inside. Take the lowest freq to make item for a sentence; add remaining items to list
-        //Pass 2: take N-sent lowest freq from remainder list
-        let restList =
-            clozeSentences
-            |> List.collect( fun sa -> 
-                let clozables = sa |> GetClozable |> Seq.sortByDescending( fun c -> c.prob ) |> Seq.toList
-                //make min items so each sentence has 1 item
-                AddClozable sa clozables.Head
-                //sentence, remaining clozables; flatten/inflate
-                clozables.Tail |> List.map( fun c -> sa,c)
-            )
-
-        //make remaining items
-        restList
-        |> List.sortBy( fun (_,c) -> c.prob )
-        |> List.take (itemCount - sentenceCount) //bc we already took sentenceCount worth: we took the min of each sentence
-        |> List.iter( fun (sa,c) -> AddClozable sa c )
-
-        //Add all sentences we are NOT using as well; they have null for clozables
-        da.sentences
-        |> Array.iter( fun sen ->
-            if not <| clozeResultDictionary.ContainsKey(sen) then
-                clozeResultDictionary.Add( sen, null )
-        )
-
-        //return 1, clozeResultDictionary |> toJson //gives Thoth serialization errors; suspect generics in nested types are problem
-        // let result = GetResultJson() 
-        return 1, GetResultJson()
+        return 1, {sentences = da.sentences; coreference = da.coreference; clozables = clozables} |> toJson
     }
+
+/// Remove overlapping cloze, preferring larger spans
+/// a starts before b, but they overlap
+/// b starts before a, but they overlap
+/// a entirely inside b
+/// b entirely inside a
+/// all covered with a.start < b.end && b.start < a.end;
+let RemoveOverlappingClozables (clozables : Clozable[] ) =
+    let clozablesOut = ResizeArray<Clozable>(clozables)
+    for ci = 0 to clozables.Length - 1 do
+        for cj = ci to clozables.Length - 1 do
+            let overlap =  ci <> cj && clozables.[ci].start <= clozables.[cj].stop && clozables.[cj].start <= clozables.[ci].stop
+            //keep the bigger one
+            if overlap && (clozables.[ci].stop - clozables.[ci].start) >= (clozables.[cj].stop - clozables.[cj].start) then 
+                clozablesOut.Remove( clozables.[cj] ) |> ignore
+            elif overlap then
+                clozablesOut.Remove( clozables.[ci] ) |> ignore
+    //
+    clozablesOut.ToArray()
 
 /// Return an item as a sentence with words blanked out, together with the corresponding words
 let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
@@ -522,32 +486,101 @@ let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
     itemWords |> String.concat " ", cl.words |> String.concat " "
 
 /// Public facing API. Calls the internal function and then wraps result in API format
-let GetClozeAPI (nlpOption: string option) (input : string) = 
+let GetClozeAPI (nlpOption: string option) (sentenceCountOption: int option) (itemCountOption: int option) (input : string) = 
     promise{
-        let! clozeInternal = input |> GetClozeInternal nlpOption |> Promise.map snd
+        let! internalAPIJson = input |> GetInternalAPI nlpOption |> Promise.map snd 
+        let internalAPI = internalAPIJson |> ofJson<InternalAPI>
         
-        //Debug: TODO better error handling
-        // let decodeResult = clozeInternal |> Decode.Auto.fromString<Map<SentenceAnnotation,Clozable[]>>
-        // let clozeResultDictionary = 
-        //     match decodeResult with
-        //     | Ok res -> res
-        //     | Error e -> Map.empty<SentenceAnnotation,Clozable[]>
+          //Estimate how many items we want if this wasn't specified
+        let sentenceCount = 
+            match sentenceCountOption with
+            | Some(sentenceCount) -> sentenceCount
+            | None -> internalAPI.sentences |> Array.map( fun x -> x.sen) |> EstimateDesiredSentences 
+        let itemCount =
+            match itemCountOption with
+            | Some(itemCount) -> itemCount
+            | None -> sentenceCount |> EstimateDesiredItems
+        
+        //hard filter: we exclude sentences that don't meet these criteria:
+        // 3 corefs with chain length > 2
+        // TODO: We don't have the discourse parser yet, so we can't apply the "sentence contains nucleus" constraint
 
-        let clozeResultDictionary = clozeInternal |> ofJson<Map<SentenceAnnotation,Clozable[]>>
+        //partition sentences into those meeting strict criteria and the rest
+        let hardFilterTuples,remainingTuples =
+            internalAPI.sentences
+            |> Array.mapi( fun i s -> s,internalAPI.clozables.[i])
+            //Filter sentences we don't know how to handle (A&P specific)
+            |> Array.filter( fun (sa,_) -> sa.sen |> badSentenceRegex.IsMatch |> not )
+            //Handle overlapping cloze
+            |> Array.map( fun ( sa, cl ) -> sa, cl |> RemoveOverlappingClozables )
+            //Remove impossibly hard cloze (>3 fill ins; TODO: get theoretical justification; assume pseudohead is problem)
+            |> Array.map( fun ( sa, cls ) -> sa, cls |> Array.filter( fun cl -> cl.words.Length < 4 ) )
+            //Filter sentences with no clozables
+            |> Array.filter( fun (_,cl) -> cl.Length > 0 )
+            |> Array.toList
+            //Apply strict criteria to create partition
+            |> List.partition( fun (sa,_) ->
+                let chainsLengthTwoOrMore = 
+                    sa.cor.clusters 
+                    |> Array.map( fun id -> internalAPI.coreference.clusters.[id])
+                    |> Array.filter( fun c -> c.Length > 1)
+                chainsLengthTwoOrMore.Length > 2 //we have > 2 chains with length > 1
+            )
+
+        //Get the cloze tuples to make our items from. NOTE: we let desiredSentences take priority over desiredItems here. TODO decide which has priority, sentences or items.
+        let clozeTuples =
+            let hardFilterSentenceCount = hardFilterTuples.Length
+            //let hardFilterItemCount = hardFilterTuples |> Seq.collect snd |> Seq.length
+            //if hard filter produced at least as many items and sentences as we need, sort by total weight and take what we need. TODO use other criteria besides weight?
+            if hardFilterSentenceCount > sentenceCount then //&& hardFilterItemCount > itemCount then
+                hardFilterTuples |> List.sortByDescending( fun (sa,_) -> sa |> GetTotalWeight internalAPI ) |> List.take sentenceCount |> List.sortBy( fun (s,_) -> s.id )
+            //otherwise use all hard filter tuples and add top remainingTuples to get desired counts
+            else
+                hardFilterTuples @ (remainingTuples  |> List.sortByDescending( fun (sa,_) -> sa |>  GetTotalWeight internalAPI ) |> List.take (sentenceCount-hardFilterTuples.Length ) )
+                |> List.sortBy( fun (s,_)-> s.id )
+
+        //We need to generate the desired # items BUT we also must take at least 1 from each sentence
+        //Step 1. Partition clozables into min per sentence and rest per sentence
+        let clozeProbTuples = 
+            clozeTuples
+            |> List.map( fun (sa,cls) -> 
+                let sorted = cls |> Array.sortBy( fun cl -> cl.prob ) |> Array.toList
+                sa,sorted.Head,sorted.Tail
+            )
+
+        //Step 2. Combine and rank rest clozables by prob, take itemCount, create lookup map
+        let restClozableMap = 
+            clozeProbTuples
+            |> List.collect( fun (sa,_,rest) -> 
+                rest |> List.map( fun c -> sa,c) //inflate
+            )
+            |> List.sortBy( fun (_,cl) -> cl.prob)
+            |> List.take (itemCount - sentenceCount)
+            |> List.groupBy fst
+            |> Map.ofList
+   
+        //Step 3. Iterate over clozeProbTuples, adding matching high prob clozables to make allClozableMap
+        let allClozableMap = 
+            clozeProbTuples
+            |> List.map( fun (sa, min, rest ) ->
+                let cl = 
+                    match restClozableMap.TryFind(sa) with 
+                    | Some( t ) -> t |> List.map snd
+                    | None -> []
+                sa, min::cl
+            )
+            |> Map.ofList
+
+        //Package for external API
         let acronymMap = input |> GetAcronymMap |> ofJson<Map<string,string>>
-
         let sentences = ResizeArray<SentenceAPI>()
         let clozes = ResizeArray<ClozableAPI>()
 
-        //clozeResultDictionary.Keys
-        clozeResultDictionary
-        |> Map.toSeq
-        |> Seq.sortBy( fun (sa,cl) -> sa.id ) //not sure if sorted order is needed/assumed
-        |> Seq.iter( fun (sa,clozables) ->
-            match clozables.Length with
-            //no clozables for this sentence
-            | 0 -> sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = false} )
-            | _ -> 
+        internalAPI.sentences
+        |> Seq.iter( fun sa ->
+            match allClozableMap.TryFind(sa) with
+            | None -> sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = false} )
+            | Some(clozables) -> 
                 sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
                 clozables |> Seq.iter( fun cl ->
                     let cloze,correctResponse = MakeItem sa cl

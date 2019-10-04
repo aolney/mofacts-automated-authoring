@@ -53,6 +53,10 @@ type Model =
     JsonResult : string
     ///Json loaded from file
     JsonInput : string option
+    ///Desired # sentences for external API
+    DesiredSentences : string
+    ///Desired # items for external API
+    DesiredItems : string
   }
 
 type Msg =
@@ -64,6 +68,8 @@ type Msg =
     | LoadParseFile of Browser.Types.FileList
     | SetParseJson of string
     | ClearParse
+    | UpdateSentences of string
+    | UpdateItems of string
     // | ErrorResult of int * string
         
 let init () : Model * Cmd<Msg> =
@@ -73,11 +79,17 @@ let init () : Model * Cmd<Msg> =
       Status = ""
       JsonResult = ""
       JsonInput = None
+      DesiredSentences = ""
+      DesiredItems = ""
     }, [] )
 
 
 // Update
 // ---------------------------------------
+let ParseIntOption s =
+   match System.Int32.TryParse(s) with
+   | (true,int) -> Some(int)
+   | _ -> None
 
 let update msg (model:Model) =
   match msg with
@@ -98,8 +110,8 @@ let update msg (model:Model) =
       | Acronym -> Process.GetAcronymMap >> Process.Promisify
       | Reverse -> Process.DoSimpleComputation >> Process.Promisify
       | NLP -> Process.GetNLP
-      | InternalAPI -> Process.GetClozeInternal model.JsonInput
-      | ExternalAPI -> Process.GetClozeAPI model.JsonInput
+      | InternalAPI -> Process.GetInternalAPI model.JsonInput
+      | ExternalAPI -> Process.GetClozeAPI model.JsonInput (ParseIntOption <| model.DesiredSentences)  (ParseIntOption <| model.DesiredItems)
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -131,6 +143,10 @@ let update msg (model:Model) =
     ( { model with JsonInput = Some(json)}, [])
   | ClearParse ->
     ( { model with JsonResult = ""; JsonInput = None}, [] )
+  | UpdateSentences(input)->
+    ( { model with DesiredSentences=input}, [] )
+  | UpdateItems(input)->
+    ( { model with DesiredItems=input}, [] )
 
 // View
 // ---------------------------------------
@@ -153,7 +169,7 @@ let view model dispatch =
       ]
       //editing and uploading data
       Fulma.Columns.columns [] [        
-        Fulma.Column.column [ Column.Width  (Screen.All, Column.IsThreeFifths )  ] [
+        Fulma.Column.column [ Column.Width  (Screen.All, Column.IsOneThird )  ] [
           Label.label [ ] [ str "Input" ]
           textarea [
             ClassName "input"
@@ -165,55 +181,79 @@ let view model dispatch =
             ] 
             OnChange (fun ev ->  !!ev.target?value |> UpdateText|> dispatch )
           ] []
-          Fulma.File.file [ 
-              Fulma.File.HasName 
-              //Key allows us to reload a file after clearing it
-              Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadParseFile !!ev.target?files  |> dispatch ) ] 
-              ] [ 
-              Fulma.File.label [ ] [ 
-                Fulma.File.input [ Props [ Accept ".json" ]]
-                Fulma.File.cta [ ] [ 
-                  Fulma.File.icon [ ] [ 
-                    Icon.icon [ ] [ 
-                      Fa.i [ Fa.Solid.Upload ] []
-                      ]
-                  ]
-                  Fulma.File.label [ ] [ str "Load Parse" ] ]
-                Fulma.File.name [ ] [ str (match model.JsonInput with | Some(_) -> "Status: Loaded" | None -> "Status: Empty" ) ] 
-                Button.button [ 
-                  Button.Color IsPrimary
-                  Button.OnClick (fun _ -> dispatch ClearParse )
-                  ] [ str "Clear Parse" ]
+
+          Field.div [] [
+            Label.label [ ] [ str "Service" ]
+            Control.div [ ] [ 
+              Select.select [  ] [ 
+                select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ] [ 
+                  option [ Value Service.ExternalAPI ] [ str "External API" ]
+                  option [ Value Service.InternalAPI ] [ str "Internal API" ]
+                  option [ Value Service.NLP ] [ str "Composite NLP" ]
+                  option [ Value Service.SRL ] [ str "SRL Parse" ]
+                  option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
+                  option [ Value Service.Coreference ] [ str "Coreference" ] 
+                  option [ Value Service.SentenceSplitter ] [ str "Sentence Splitter" ] 
+                  option [ Value Service.CleanText  ] [ str "Clean Text" ] 
+                  option [ Value Service.Acronym  ] [ str "Acronym" ] 
+                  option [ Value Service.Reverse  ] [ str "Reverse" ] 
+                ] 
+              ]
+            ]
+          ]
+          div [ Hidden ( model.Service <> Service.ExternalAPI && model.Service <> Service.InternalAPI ) ] [
+            Label.label [ ] [ str "Optional Parse" ]
+            Fulma.File.file [ 
+                Fulma.File.HasName 
+                //Key allows us to reload a file after clearing it
+                Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadParseFile !!ev.target?files  |> dispatch ) ] 
+                ] [ 
+                Fulma.File.label [ ] [ 
+                  Fulma.File.input [ Props [ Accept ".json" ]]
+                  Fulma.File.cta [ ] [ 
+                    Fulma.File.icon [ ] [ 
+                      Icon.icon [ ] [ 
+                        Fa.i [ Fa.Solid.Upload ] []
+                        ]
+                    ]
+                    Fulma.File.label [ ] [ str "Load Parse" ] ]
+                  Fulma.File.name [ ] [ str (match model.JsonInput with | Some(_) -> "Status: Loaded" | None -> "Status: Empty" ) ] 
+                  Button.button [ 
+                    Button.Color IsPrimary
+                    Button.OnClick (fun _ -> dispatch ClearParse )
+                    ] [ str "Clear Parse" ]
+                ] 
               ] 
-            ] 
+          ]
+          div [ Hidden ( model.Service <> Service.ExternalAPI ) ] [
+            Label.label [ ] [ str "Optional Desired Sentences" ] 
+            Input.text [
+                  Input.Color IsPrimary
+                  Input.IsRounded
+                  Input.Value ( model.DesiredSentences.ToString() )
+                  Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateSentences|> dispatch ) ]
+                ]
+            Label.label [ ] [ str "Optional Desired Items" ] 
+            Input.text [
+                  Input.Color IsPrimary
+                  Input.IsRounded
+                  Input.Value ( model.DesiredItems.ToString() )
+                  Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateItems|> dispatch ) ]
+                ]
+            ]
+
+          Button.button [ 
+          Button.Color IsPrimary
+          Button.OnClick (fun _ -> dispatch CallService )
+          ] [ str "Get Results" ]
+
         ]
         //Select and run service
-        Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
-          Field.div [ ]
-                [ Label.label [ ]
-                    [ str "Service" ]
-                  Control.div [ ]
-                     [ Select.select [  ]
-                        [ select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ]
-                            [ 
-                              option [ Value Service.ExternalAPI ] [ str "External API" ]
-                              option [ Value Service.InternalAPI ] [ str "Internal API" ]
-                              option [ Value Service.NLP ] [ str "Composite NLP" ]
-                              option [ Value Service.SRL ] [ str "SRL Parse" ]
-                              option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
-                              option [ Value Service.Coreference ] [ str "Coreference" ] 
-                              option [ Value Service.SentenceSplitter ] [ str "Sentence Splitter" ] 
-                              option [ Value Service.CleanText  ] [ str "Clean Text" ] 
-                              option [ Value Service.Acronym  ] [ str "Acronym" ] 
-                              option [ Value Service.Reverse  ] [ str "Reverse" ] 
-                            ] ] ] ]
-          Button.button [ 
-            Button.Color IsPrimary
-            Button.OnClick (fun _ -> dispatch CallService )
-            ] [ str "Get Results" ]
-        ]
+        // Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
+
+        // ]
         // View model state and get results
-        Fulma.Column.column [ Column.Width (Screen.All, Column.IsNarrow) ] [
+        Fulma.Column.column [ Column.Width (Screen.All, Column.IsTwoThirds) ] [
           Label.label [ ] [ str "Model State" ]
           Button.button [ 
             Button.Color IsPrimary
