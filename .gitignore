@@ -207,3 +207,6 @@ deploy/
 test-build/
 node-build/
 *.pdf
+
+mono_crash*
+*.zip

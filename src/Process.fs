@@ -187,17 +187,21 @@ let endpoints =
         Coreference = "http://141.225.12.235:8000/predict/coreference-resolution"
         DependencyParser = "http://141.225.12.235:8000/predict/dependency-parsing"
         SentenceSplitter = "http://141.225.12.235:8001/sents"
+        // SRL = "https://allennlp.olney.ai/predict/semantic-role-labeling"
+        // Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
+        // DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
+        // SentenceSplitter = "https://spacy.olney.ai/sents"
     }
 
-///Function template for POSTs. Requires on-campus IP address. We assume Promise will give better meteor compatibility
-let PostAPI (input:obj) endpoint =
+///Function template for POSTs. Requires on-campus IP address. We assume Promise will give better meteor compatibility. Passing in the encoding to avoid CORS preflight on spacy.
+let PostAPI (input:obj) endpoint encoding =
     async {
         let requestData = input |> toJson 
         let! response = 
             Http.request endpoint
             |> Http.method POST
             |> Http.content (BodyContent.Text requestData)
-            |> Http.header (Headers.contentType "application/json")
+            |> Http.header (Headers.contentType encoding)
             |> Http.send
         return response.statusCode,response.responseText
     }
@@ -205,19 +209,19 @@ let PostAPI (input:obj) endpoint =
 
 ///Get coreferences from AllenNLP
 let GetCoreference( input: string ) =
-    PostAPI { document = input } endpoints.Coreference
+    PostAPI { document = input } endpoints.Coreference "application/json"
 
 ///Get SRL from AllenNLP.
 let GetSRL( input: string ) =
-    PostAPI { sentence = input } endpoints.SRL
+    PostAPI { sentence = input } endpoints.SRL "application/json"
 
 ///Get a parse from AllenNLP.
 let GetDependencyParse( input: string ) =
-    PostAPI { sentence = input } endpoints.DependencyParser
+    PostAPI { sentence = input } endpoints.DependencyParser "application/json"
 
-///Get split sentences from Spacy
+///Get split sentences from Spacy. HACK: passing in this encoding to avoid CORS preflight 
 let GetSentences( input: string ) =
-    PostAPI { text = input; model = "en" } endpoints.SentenceSplitter
+    PostAPI { text = input; model = "en" } endpoints.SentenceSplitter "text/plain"
 
 ///Call services with sentences to generate a seq of promises; remap to promise of seq
 let GetForSentences (service: string -> JS.Promise<int*string>) (sentences:string[]) =

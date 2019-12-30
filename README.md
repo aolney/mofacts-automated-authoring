@@ -4,7 +4,7 @@ Creates cloze items for improving reading comprehension. Extends [this previous 
 
 The GUI is intended for testing purposes rather than for end-users. The underlying components are intended for the [MoFaCTS project](https://github.com/memphis-iis/mofacts-ies), which has its own interface.
 
-[A live demo of the test GUI is here](https://olney.ai/mofacts-automated-authoring/), but NLP services won't work unless you are on the University of Memphis campus. 
+[A live demo of the test GUI is here](http://olney.ai/mofacts-automated-authoring/), but NLP services won't work unless you are on the University of Memphis campus. 
 
 ------------------------------
 
