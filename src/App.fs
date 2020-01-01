@@ -38,8 +38,8 @@ type Service =
   | Reverse
   ///Composite service
   | NLP 
-  | InternalAPI
-  | ExternalAPI
+  | AllCloze
+  | SelectCloze
 
 type Model = 
   {
@@ -51,12 +51,14 @@ type Model =
     Status : string
     ///Result from the service called
     JsonResult : string
-    ///Json loaded from file
+    ///Json loaded from file, e.g. a parse
     JsonInput : string option
     ///Desired # sentences for external API
     DesiredSentences : string
     ///Desired # items for external API
     DesiredItems : string
+    //To calculate word difficulty we need to return additional data from the GetSelectCloze API call
+    // Trace : bool
   }
 
 type Msg =
@@ -75,7 +77,7 @@ type Msg =
 let init () : Model * Cmd<Msg> =
   ( { 
       InputText = "GitHub makes it easy to scale back on context switching."
-      Service = InternalAPI
+      Service = AllCloze
       Status = ""
       JsonResult = ""
       JsonInput = None
@@ -102,16 +104,16 @@ let update msg (model:Model) =
     //Test a service; we select here based on what's in the model
     let service = 
       match model.Service with
-      | SRL -> Process.GetSRL
-      | DependencyParser -> Process.GetDependencyParse
-      | Coreference -> Process.GetCoreference
-      | SentenceSplitter -> Process.GetSentences
-      | CleanText -> Process.CleanText >> Process.Promisify
-      | Acronym -> Process.GetAcronymMap >> Process.Promisify
-      | Reverse -> Process.DoSimpleComputation >> Process.Promisify
-      | NLP -> Process.GetNLP
-      | InternalAPI -> Process.GetInternalAPI model.JsonInput
-      | ExternalAPI -> Process.GetClozeAPI model.JsonInput (ParseIntOption <| model.DesiredSentences)  (ParseIntOption <| model.DesiredItems)
+      | SRL -> AllenNLP.GetSRL
+      | DependencyParser -> AllenNLP.GetDependencyParse
+      | Coreference -> AllenNLP.GetCoreference
+      | SentenceSplitter -> AllenNLP.GetSentences
+      | CleanText -> AllenNLP.CleanText >> AllenNLP.Promisify
+      | NLP -> AllenNLP.GetNLP
+      | Acronym -> ClozeAPI.GetAcronymMap >> AllenNLP.Promisify
+      | Reverse -> ClozeAPI.DoSimpleComputation >> AllenNLP.Promisify
+      | AllCloze -> ClozeAPI.GetAllCloze model.JsonInput
+      | SelectCloze -> ClozeAPI.GetSelectCloze model.JsonInput (ParseIntOption <| model.DesiredSentences)  (ParseIntOption <| model.DesiredItems) true //replace with 'false' for normal operation
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -120,6 +122,8 @@ let update msg (model:Model) =
       Cmd.OfPromise.perform service model.InputText ( fun result -> result |> ServiceResult )
     )
   | ServiceResult(code,json)->
+    //for debug: chrome is freezing up, so trying to dump non-essential fields from the model
+    // ( {model with InputText=""; JsonInput=None; JsonResult=json; Status=code.ToString()}, [])
     ( {model with JsonResult=json; Status=code.ToString()}, [])
   | ServiceChange(service) ->
     ( {model with Service=service; Status=""}, [])
@@ -187,8 +191,8 @@ let view model dispatch =
             Control.div [ ] [ 
               Select.select [  ] [ 
                 select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ] [ 
-                  option [ Value Service.ExternalAPI ] [ str "External API" ]
-                  option [ Value Service.InternalAPI ] [ str "Internal API" ]
+                  option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
+                  option [ Value Service.AllCloze ] [ str "Get All Cloze" ]
                   option [ Value Service.NLP ] [ str "Composite NLP" ]
                   option [ Value Service.SRL ] [ str "SRL Parse" ]
                   option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
@@ -201,7 +205,7 @@ let view model dispatch =
               ]
             ]
           ]
-          div [ Hidden ( model.Service <> Service.ExternalAPI && model.Service <> Service.InternalAPI ) ] [
+          div [ Hidden ( model.Service <> Service.SelectCloze && model.Service <> Service.AllCloze ) ] [
             Label.label [ ] [ str "Optional Parse" ]
             Fulma.File.file [ 
                 Fulma.File.HasName 
@@ -225,7 +229,7 @@ let view model dispatch =
                 ] 
               ] 
           ]
-          div [ Hidden ( model.Service <> Service.ExternalAPI ) ] [
+          div [ Hidden ( model.Service <> Service.SelectCloze ) ] [
             Label.label [ ] [ str "Optional Desired Sentences" ] 
             Input.text [
                   Input.Color IsPrimary
@@ -245,7 +249,7 @@ let view model dispatch =
           Button.button [ 
           Button.Color IsPrimary
           Button.OnClick (fun _ -> dispatch CallService )
-          ] [ str "Get Results" ]
+          ] [ str "Call Service" ]
 
         ]
         //Select and run service
