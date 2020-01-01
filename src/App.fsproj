@@ -4,7 +4,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="WordFrequency.fs" />
-    <Compile Include="Process.fs" />
+    <Compile Include="AllenNLP.fs" />
+    <Compile Include="ClozeAPI.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />
