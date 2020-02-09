@@ -136,17 +136,18 @@ type TextRequest =
 ///Endpoints for NLP services
 let endpoints =
     {
-        SRL = "http://141.225.12.235:8000/predict/semantic-role-labeling"
-        Coreference = "http://141.225.12.235:8000/predict/coreference-resolution"
-        DependencyParser = "http://141.225.12.235:8000/predict/dependency-parsing"
-        SentenceSplitter = "http://141.225.12.235:8001/sents"
-        // SRL = "https://allennlp.olney.ai/predict/semantic-role-labeling"
-        // Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
-        // DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
-        // SentenceSplitter = "https://spacy.olney.ai/sents"
+        //http requires on-campus IP address
+        // SRL = "http://141.225.12.235:8000/predict/semantic-role-labeling"
+        // Coreference = "http://141.225.12.235:8000/predict/coreference-resolution"
+        // DependencyParser = "http://141.225.12.235:8000/predict/dependency-parsing"
+        // SentenceSplitter = "http://141.225.12.235:8001/sents"
+        SRL = "https://allennlp.olney.ai/predict/semantic-role-labeling"
+        Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
+        DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
+        SentenceSplitter = "https://spacy.olney.ai/sents"
     }
 
-///Function template for POSTs. Requires on-campus IP address. We assume Promise will give better meteor compatibility. Passing in the encoding to avoid CORS preflight on spacy.
+///Function template for POSTs. We assume Promise will give better meteor compatibility. Passing in the encoding to avoid CORS preflight on spacy.
 let PostAPI (input:obj) endpoint encoding =
     async {
         let requestData = input |> toJson 
