@@ -97,7 +97,10 @@ type SentenceCoreference =
 ///Sentence level annotation combining  annotations from all NLP services
 type SentenceAnnotation = 
     {
+        /// Position in text
         id : int
+        /// Arbitrary tags assigned to annotation, e.g. source information
+        tags : string[]
         sen : string
         srl : SRLResult
         dep : DependencyParseResult
@@ -136,19 +139,23 @@ type TextRequest =
 ///Endpoints for NLP services
 let endpoints =
     {
+        //http requires on-campus IP address
         SRL = "http://141.225.12.235:8000/predict/semantic-role-labeling"
         Coreference = "http://141.225.12.235:8000/predict/coreference-resolution"
         DependencyParser = "http://141.225.12.235:8000/predict/dependency-parsing"
         SentenceSplitter = "http://141.225.12.235:8001/sents"
+        // TODO: every once and a while getting a bogus cors error from caddy, but suspect it is due to caddy getting flooded
         // SRL = "https://allennlp.olney.ai/predict/semantic-role-labeling"
         // Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
         // DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
         // SentenceSplitter = "https://spacy.olney.ai/sents"
     }
 
-///Function template for POSTs. Requires on-campus IP address. We assume Promise will give better meteor compatibility. Passing in the encoding to avoid CORS preflight on spacy.
+///Function template for POSTs. We assume Promise will give better meteor compatibility. Passing in the encoding to avoid CORS preflight on spacy.
 let PostAPI (input:obj) endpoint encoding =
+    // promise { do! Promise.sleep 500 } |> Promise.start //attempted throttle
     async {
+        do! Async.Sleep 200 //attempted throttle
         let requestData = input |> toJson 
         let! response = 
             Http.request endpoint
@@ -159,7 +166,7 @@ let PostAPI (input:obj) endpoint encoding =
         return response.statusCode,response.responseText
     }
     |> Async.StartAsPromise
-
+    
 ///Get coreferences from AllenNLP
 let GetCoreference( input: string ) =
     PostAPI { document = input } endpoints.Coreference "application/json"
@@ -201,11 +208,29 @@ let CleanText input =
     |> RegexReplace " \.$" "." //replacements leave spaces before final period
     |> transliteration.transliterate
 
-///Call all NLP functions for a piece of text
-let GetNLP( input : string) =
+///Call all NLP functions for chunks of text, where each chunk represents a semantic grouping (i.e. chapter section) of the same type
+let GetNLP( chunksJson : string) =
     promise {
+        //a bit awkward, but we need to do this for the webpage api since all services must take string input
+        let chunks = chunksJson |> ofJson<string[]>
         //start with a promise for sentences, throwing away status
-        let! sentences = input |> CleanText|> GetSentences  |> Promise.map( snd >> ofJson<string[]> )
+        //let! sentences = input |> CleanText |> GetSentences  |> Promise.map( snd >> ofJson<string[]> )
+        let! chunkSentences = 
+            chunks
+            |> Array.map( fun chunk -> chunk |> CleanText |> GetSentences  |> Promise.map( snd >> ofJson<string[]> ) )
+            |> Promise.all
+        
+        //create lists of tags and sentences
+        let tags,sentences = 
+            //generate tag tuples from chunks, using chunk position as id
+            chunkSentences 
+            |> Array.mapi ( fun i chunk -> 
+                chunk |> Array.map( fun sen -> 
+                    [| "chunk:" + i.ToString(); "default:default" |] ,sen  ) 
+            ) 
+            |> Array.collect id //flatten to single list of sentences
+            |> Array.unzip // unzip to parallel lists of tags and sentences
+
         //Clean "junk" from text; this can blank out sentences, so we filter those
         //let sentences = rawSentences |> Array.map CleanText |> Array.filter( fun sen -> sen.Length > 0 )
 
@@ -241,7 +266,7 @@ let GetNLP( input : string) =
                             clusters.Add( clusterIndex )
                         | None -> ()
 
-                    yield { id=i; sen=sentences.[i] ; srl=srl; dep=dep; cor={offset=wordIndexOffset; spans=spans.ToArray();clusters=clusters.ToArray()} }
+                    yield { id=i; tags = tags.[i]; sen=sentences.[i] ; srl=srl; dep=dep; cor={offset=wordIndexOffset; spans=spans.ToArray();clusters=clusters.ToArray()} }
 
                     wordIndexOffset <- wordIndexOffset + srl.words.Length //all services should agree on tokens in sentence, so using srl here is arbitrary
 

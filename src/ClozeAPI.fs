@@ -27,6 +27,8 @@ type ClozableAPI =
     itemId : int
     clozeId : int
     correctResponse : string
+    /// Tags we can use for cluster assignment
+    tags : string[]
   }
 
 ///Public API for items
@@ -43,8 +45,11 @@ type Clozable =
         words : string[]
         start : int
         stop : int
+        /// Collected messages reflecting our decision making; primarily for debug purposes
         trace : string[]
         prob : float
+        /// Tags we can use for cluster assignment
+        tags : string[]
     }
     /// A custom decoder allows precise json decoding errors to be reported
     static member Decoder : Thoth.Json.Decoder<Clozable>=
@@ -56,6 +61,7 @@ type Clozable =
                     stop = get.Required.Field "stop" Decode.int
                     trace = get.Required.Field "trace" (Decode.array Decode.string)
                     prob = get.Required.Field "prob" Decode.float
+                    tags = get.Required.Field "words" (Decode.array Decode.string)
                 }
             )
 
@@ -80,21 +86,22 @@ let EstimateDesiredItems desiredSentences =
 
 /// Get weight of all chains in a sentence (add the lengths together)
 let GetTotalWeight ( coref : CoreferenceResult ) sen =
-    //Problems: 
+    // ** FALL 2019 VERSION **
+    // Problems: 
     // 1. can have duplicates
     // 2. appears to be measuring length of spans not lengths of chains
-    sen.cor.clusters 
-    |> Array.collect( fun id -> 
-        let cluster = coref.clusters.[id]
-        cluster |> Array.map( fun c -> c.Length) 
-        )
-    |> Array.sum
+    // sen.cor.clusters 
+    // |> Array.collect( fun id -> 
+    //     let cluster = coref.clusters.[id]
+    //     cluster |> Array.map( fun c -> c.Length) 
+    //     )
+    // |> Array.sum
     // ****** TODO ***** below is techinically correct but we temporarily disable to generate features for analyzing fall 2019 data. Otherwise items may not match
-    // let totalWeight =
-    //     sen.cor.clusters
-    //     |> Array.distinct
-    //     |> Array.sumBy( fun id -> coref.clusters.[id].Length )
-    // totalWeight
+    let totalWeight =
+        sen.cor.clusters
+        |> Array.distinct
+        |> Array.sumBy( fun id -> coref.clusters.[id].Length )
+    totalWeight
 
 // -- Features for word level difficulty analysis, appended to trace ---
 // COMPLETELY GENERIC trace features for analysis of difficulty of this word
@@ -122,12 +129,12 @@ let getFeatureCorefClusters sen =
 
 /// total weight of sentence clusters feature: length of each cluster/chain in sentence
 let getFeatureCorefClusterTotalWeight sen ( da : DocumentAnnotation ) =
-    // TODO: This is correct but fall 2019 did not use this, so we use the old way above for selecting items temporarily
-    // let totalWeight = GetTotalWeight da.coreference sen
-    let totalWeight =
-        sen.cor.clusters
-        |> Array.distinct
-        |> Array.sumBy( fun id -> da.coreference.clusters.[id].Length )
+    let totalWeight = GetTotalWeight da.coreference sen
+    // ** FALL 2019 METHOD **
+    // let totalWeight =
+    //     sen.cor.clusters
+    //     |> Array.distinct
+    //     |> Array.sumBy( fun id -> da.coreference.clusters.[id].Length )
     "@corefClusterTotalWeight:" + totalWeight.ToString()
 
 /// backward weight of sentence cluster feature: length of each cluster/chain in backward direction
@@ -162,7 +169,7 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
     //check for insanity first. return empty if insane
     if startInit < 0 || stopInit >= sen.srl.words.Length then //|| head < 0 || head >= sen.srl.words.Length then
         trace.Add("CRITICAL: invalid clozable parameters for " + (sen |> toJson ) )
-        { words=Array.empty; start=0; stop=0; trace=trace.ToArray() ; prob = 1.0 }
+        { words=Array.empty; start=0; stop=0; trace=trace.ToArray() ; prob = 1.0 ; tags = sen.tags } //TODO tags
     else
         //this is a pseudohead of the span. we can't use real heads because stanford dependencies aren't universal dependencies
         //therefore we must allow for functional/exocentric heads but find the pseudohead approximating universal dependencies 
@@ -213,6 +220,7 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                 trace = trace.ToArray()
                 //use the lowest freq word in the span
                 prob = words |> Array.map WordFrequency.Get |> Array.min
+                tags = sen.tags //TODO tags
             }
         //
         clozable
@@ -259,13 +267,13 @@ let badSentenceRegex = System.Text.RegularExpressions.Regex( "(figure|table|sect
 
 /// Generates clozables for every sentence when given a block of text and an optional JSON of DocumentAnnotation (a serialized parse)
 /// NOTE: input may be empty if serialized parse is passed in.
-let GetAllCloze (nlpJsonOption: string option) ( input : string ) =
+let GetAllCloze (nlpJsonOption: string option) ( inputJson : string ) =
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
         let! nlp = 
             match nlpJsonOption with
             | Some(nlpJson) -> nlpJson |> Promisify |> Promise.map snd 
-            | None -> input |> GetNLP |> Promise.map snd 
+            | None -> inputJson |> GetNLP |> Promise.map snd 
         let da = nlp |> ofJson<DocumentAnnotation>
 
         //Make clozables for every sentence (not efficient, but useful for research)
@@ -300,7 +308,7 @@ let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
         itemWords.[i] <- "__________"
     itemWords |> String.concat " ", cl.words |> String.concat " "
 
-
+// TODO: CLEANING OUT PARENTHESES IN CLEANTEXT PROBABLY LIMITS OR UNDOES THIS
 /// Finds acronyms in parentheses and tries to map to nearby words. Makes strong assumptions / not highly general
 let GetAcronymMap input =
     //assumes all acronyms are caps only and bounded by parentheses. NOTE: used named group at first but gave up when it didn't work
@@ -333,10 +341,10 @@ let GetAcronymMap input =
 
 /// Returns select clozables given a target number by ranking clozables and returning top ranked.
 /// Since target numbers may be impossible to satisfy, does not guarantee returning the target quantities.
-/// NOTE: input must always match serialized parse b/c input is used to build acronym map (TODO CHANGE?)
-let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) (itemCountOption: int option) (doTrace : bool) (input : string) = 
+/// NOTE: input is json string[] and must always match serialized parse b/c input is used to build acronym map (TODO CHANGE?)
+let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) (itemCountOption: int option) (doTrace : bool) (inputJson : string) = 
     promise{
-        let! allClozeJson = input |> GetAllCloze nlpOption |> Promise.map snd 
+        let! allClozeJson = inputJson |> GetAllCloze nlpOption |> Promise.map snd 
         let allCloze = allClozeJson |> ofJson<InternalAPI>
         
           //Estimate how many items we want if this wasn't specified
@@ -388,7 +396,7 @@ let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) 
                 |> List.sortBy( fun (s,_)-> s.id )
 
         //We need to generate the desired # items BUT we also must take at least 1 from each sentence
-        //Step 1. Partition clozables into min per sentence and rest per sentence
+        //Step 1. Partition clozables into min probability per sentence and rest per sentence
         let clozeProbTuples = 
             clozeTuples
             |> List.map( fun (sa,cls) -> 
@@ -419,8 +427,21 @@ let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) 
             )
             |> Map.ofList
 
+        //Item tagging: rank sentences by totalweight, group into sets of 30, then create map of sentence to importance tags
+        let importantItemMap =
+            allClozableMap
+            |> Map.toList
+            |> List.sortByDescending( fun (sa,_) -> sa |>  GetTotalWeight allCloze.coreference )
+            |> List.windowed 30 //TODO arbitrary size here; need theoretical justification
+            |> List.mapi( fun i tupleList -> 
+                tupleList |> List.map( fun (sa,_) -> sa,i )
+            )
+            |> List.collect id
+            |> Map.ofList
+
         //Package for external API
-        let acronymMap = input |> GetAcronymMap |> ofJson<Map<string,string>>
+        let input = inputJson |> ofJson<string[]>
+        let acronymMap = input |> String.concat " " |> GetAcronymMap |> ofJson<Map<string,string>> 
         let sentences = ResizeArray<SentenceAPI>()
         let clozes = ResizeArray<ClozableAPI>()
 
@@ -431,13 +452,14 @@ let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) 
             | Some(clozables) -> 
                 sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
                 clozables |> Seq.iter( fun cl ->
+                    let tags = Array.append [| "weight:" + importantItemMap.[sa].ToString() |] cl.tags
                     let cloze,correctResponse = MakeItem sa cl
                     //insert any alternative correct responses here
                     let correctResponses = 
                         match acronymMap.TryFind(correctResponse) with
                         | Some( acronym ) -> correctResponse + "|" + acronym + if doTrace then "~" + (cl.trace |> String.concat "~") else ""
                         | None -> correctResponse + if doTrace then "~" + (cl.trace |> String.concat "~") else ""
-                    clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash cloze; correctResponse = correctResponses} )
+                    clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash cloze; correctResponse = correctResponses; tags=tags} ) //TODO tags
                 )
             )
         return 1, {sentences=sentences.ToArray();clozes=clozes.ToArray()} |> toJson
