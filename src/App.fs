@@ -77,7 +77,7 @@ type Msg =
 let init () : Model * Cmd<Msg> =
   ( { 
       InputText = "GitHub makes it easy to scale back on context switching."
-      Service = AllCloze
+      Service = SelectCloze
       Status = ""
       JsonResult = ""
       JsonInput = None

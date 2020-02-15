@@ -28,7 +28,7 @@ type ClozableAPI =
     clozeId : int
     correctResponse : string
     /// Tags we can use for cluster assignment
-    tags : string[]
+    tags : obj //the idea right now is to make this an anonymous record since the devs want an object rather than a list of attributes
   }
 
 ///Public API for items
@@ -39,31 +39,69 @@ type ClozeAPI =
   }
   
 //-- Internal ------------------------------
+/// A tag such that we can create an object literal (a pojo) from a list of tags
+type Tag =
+    /// a measure of importance of an item group, with 1 being the most important
+    | WeightGroup of int 
+    /// the numeric order of an item group, with 1 being the first
+    | OrderGroup of int 
+    /// the dependency role of the cloze in the item
+    | SyntacticRole of string 
+    /// the semantic role of the cloze in the item
+    | SemanticRole of string
+    /// number of hops from the cloze to the root of the item
+    | RootDistance of int 
+    /// number of words from the start of the item to the cloze
+    | StartDistance of int 
+    /// The number of coref clusters/chains in the item
+    | CorefClusters of int
+    /// The total weight (length) of all coref chains in the item
+    | CorefClusterTotalWeight of int
+    /// The backward weight (length) of all coref chains in the item
+    | CorefClusterBackwardWeight of int
+    /// The forward weight (length) of all coref chains in the item
+    | CorefClusterForwardWeight of int
+    /// Debug information
+    | Trace of string
+    /// Mark deprecated tags that may still be in parse
+    | Deprecated of string
+
+
+let StringToTag (keyValue : string) =
+    let s = keyValue.Split(':')
+    match s.[0] with
+    | "weightGroup" -> s.[1] |> int |> WeightGroup
+    | "orderGroup" -> s.[1] |> int |> OrderGroup
+    | "chunk" ->  s.[1] |> int |> OrderGroup //transitional
+    | "default" ->  s.[1] |> Deprecated //transitional
+    | _ -> "Error:" + keyValue |> Trace
+
 ///A clozable we have generated
 type Clozable =
     {
         words : string[]
         start : int
         stop : int
-        /// Collected messages reflecting our decision making; primarily for debug purposes
-        trace : string[]
+        /// Collected messages reflecting our decision making; primarily for debug purposes (obj b/c some are Tag)
+        trace : Tag list
         prob : float
         /// Tags we can use for cluster assignment
-        tags : string[]
+        tags : Tag list
     }
+    //TODO switching to auto encoding/decoding b/c of the complexity of Tags and trace
     /// A custom decoder allows precise json decoding errors to be reported
-    static member Decoder : Thoth.Json.Decoder<Clozable>=
-        Decode.object
-            ( fun get ->
-                {
-                    words = get.Required.Field "words" (Decode.array Decode.string)
-                    start = get.Required.Field "start" Decode.int
-                    stop = get.Required.Field "stop" Decode.int
-                    trace = get.Required.Field "trace" (Decode.array Decode.string)
-                    prob = get.Required.Field "prob" Decode.float
-                    tags = get.Required.Field "words" (Decode.array Decode.string)
-                }
-            )
+    // static member Decoder : Thoth.Json.Decoder<Clozable>=
+    //     Decode.object
+    //         ( fun get ->
+    //             {
+    //                 words = get.Required.Field "words" (Decode.array Decode.string)
+    //                 start = get.Required.Field "start" Decode.int
+    //                 stop = get.Required.Field "stop" Decode.int
+    //                 trace = get.Required.Field "trace" (Decode.array Decode.string)
+    //                 prob = get.Required.Field "prob" Decode.float
+    //                 tags = get.Required.Field "tags" (Decode.list Decode.string)
+    //             }
+    //         )
 
 ///All data we have collected and will use for final creation of cloze items
 type InternalAPI =
@@ -116,16 +154,19 @@ let getFeatureDistanceFromRoot start stop sen =
         //
         distance
     let maxDistance = [|  start .. stop |] |> Seq.map( fun i -> distanceFromRoot i sen.dep.predicted_heads ) |> Seq.max
-    "@rootDistance:" + maxDistance.ToString()
+    // "@rootDistance:" + maxDistance.ToString()
+    maxDistance |> RootDistance
 /// distance from start of sentence feature
 let getFeatureDistanceFromStart start =
-    "@startDistance:" + start.ToString()
+    // "@startDistance:" + start.ToString()
+    start |> StartDistance
 
 // ANNOTATION SPECIFIC trace features
 /// number of coref clusters/chains feature
 let getFeatureCorefClusters sen =
     let clusters = sen.cor.clusters |> Array.distinct
-    "@corefClusters:" + clusters.Length.ToString()
+    // "@corefClusters:" + clusters.Length.ToString()
+    clusters.Length |> CorefClusters
 
 /// total weight of sentence clusters feature: length of each cluster/chain in sentence
 let getFeatureCorefClusterTotalWeight sen ( da : DocumentAnnotation ) =
@@ -135,7 +176,8 @@ let getFeatureCorefClusterTotalWeight sen ( da : DocumentAnnotation ) =
     //     sen.cor.clusters
     //     |> Array.distinct
     //     |> Array.sumBy( fun id -> da.coreference.clusters.[id].Length )
-    "@corefClusterTotalWeight:" + totalWeight.ToString()
+    // "@corefClusterTotalWeight:" + totalWeight.ToString()
+    totalWeight |> CorefClusterTotalWeight
 
 /// backward weight of sentence cluster feature: length of each cluster/chain in backward direction
 let getFeatureCorefClusterBackwardWeight sen ( da : DocumentAnnotation )  =
@@ -145,7 +187,8 @@ let getFeatureCorefClusterBackwardWeight sen ( da : DocumentAnnotation )  =
         |> Array.collect( fun id -> da.coreference.clusters.[id] )
         |> Array.filter( fun c -> c.[1] < sen.cor.offset) //end of mention token index is before current sentence start token index
         |> Array.length
-    "@corefClusterBackwardWeight:" + weight.ToString()
+    // "@corefClusterBackwardWeight:" + weight.ToString()
+    weight |> CorefClusterBackwardWeight
 
 /// forward weight of sentence cluster feature: length of each cluster/chain in forward direction
 let getFeatureCorefClusterForwardWeight sen ( da : DocumentAnnotation )  =
@@ -155,21 +198,22 @@ let getFeatureCorefClusterForwardWeight sen ( da : DocumentAnnotation )  =
         |> Array.collect( fun id -> da.coreference.clusters.[id] )
         |> Array.filter( fun c -> c.[0] > sen.cor.offset + sen.srl.words.Length) //start of mention token index is after current sentence last token index
         |> Array.length
-    "@corefClusterForwardWeight:" + weight.ToString()
+    // "@corefClusterForwardWeight:" + weight.ToString()
+    weight |> CorefClusterForwardWeight
 
 // -- END Features for word level difficulty analysis, appended to trace ---
 
 /// Returns a Clozable for a modified NP given a sentence annotation and span of interest
 let GetModifiedNPClozable sen startInit stopInit head traceInit =
-    let trace = ResizeArray<string>()
+    let trace = ResizeArray<Tag>()
     trace.AddRange(traceInit)
     trace.Add( getFeatureDistanceFromRoot startInit stopInit sen )
     trace.Add( getFeatureDistanceFromStart startInit)
 
     //check for insanity first. return empty if insane
     if startInit < 0 || stopInit >= sen.srl.words.Length then //|| head < 0 || head >= sen.srl.words.Length then
-        trace.Add("CRITICAL: invalid clozable parameters for " + (sen |> toJson ) )
-        { words=Array.empty; start=0; stop=0; trace=trace.ToArray() ; prob = 1.0 ; tags = sen.tags } //TODO tags
+        trace.Add("CRITICAL: invalid clozable parameters for " + (sen |> toJson  ) |> Trace )
+        { words=Array.empty; start=0; stop=0; trace= trace|> Seq.toList ; prob = 1.0 ; tags = sen.tags |> Array.map StringToTag |> Array.toList } 
     else
         //this is a pseudohead of the span. we can't use real heads because stanford dependencies aren't universal dependencies
         //therefore we must allow for functional/exocentric heads but find the pseudohead approximating universal dependencies 
@@ -187,7 +231,7 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                     |> fst
                 //require nominal pseudohead if stanfordHead is not nominal
                 if sen.dep.pos.[ stanfordHead ].StartsWith("NN") |> not then
-                    trace.Add( "head is not nominal")
+                    trace.Add( "head is not nominal" |> Trace)
                     //debug
                     // if sen.id > 140 then
                     //     printfn "debug"
@@ -196,9 +240,9 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                     //get nominal words, take last
                     let nnOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.pos.[i]) |> Seq.rev |> Seq.tryFind( fun (_,h) -> h.StartsWith("NN")) 
                     match argOption,nnOption with
-                    | Some(arg),_ ->  trace.Add( "WARNING: using first syntactic arg as pseudohead"); arg |> fst
-                    | _, Some(nn) -> trace.Add( "WARNING: using last nominal as pseudohead"); nn |> fst
-                    | _,_ -> trace.Add( "CRITICAL: clozable without nominal or arg, defaulting to given span"); stopInit
+                    | Some(arg),_ ->  trace.Add( "WARNING: using first syntactic arg as pseudohead" |> Trace); arg |> fst
+                    | _, Some(nn) -> trace.Add( "WARNING: using last nominal as pseudohead" |> Trace); nn |> fst
+                    | _,_ -> trace.Add( "CRITICAL: clozable without nominal or arg, defaulting to given span" |> Trace); stopInit
                 else
                     stanfordHead
         //take preceeding modifiers of the nominal pseudohead that are nounish or JJ 
@@ -209,7 +253,7 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                 let stop = indices |> Array.last
                 start, stop, sen.srl.words.[ start .. stop ]
             else
-                trace.Add("CRITICAL: stanford head yields empty span, defaulting to given span")
+                trace.Add("CRITICAL: stanford head yields empty span, defaulting to given span" |> Trace)
                 startInit, stopInit, sen.srl.words.[ startInit .. stopInit ]
 
         let clozable = 
@@ -217,10 +261,10 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                 words = words
                 start = start
                 stop =  stop
-                trace = trace.ToArray()
+                trace = trace |> Seq.toList //.ToArray()
                 //use the lowest freq word in the span
                 prob = words |> Array.map WordFrequency.Get |> Array.min
-                tags = sen.tags //TODO tags
+                tags = sen.tags |> Array.map StringToTag |> Array.toList 
             }
         //
         clozable
@@ -233,7 +277,7 @@ let GetClozable ( da : DocumentAnnotation ) =
         //coref based cloze
         clozable.AddRange( 
             sen.cor.spans 
-            |> Seq.mapi( fun i si -> GetModifiedNPClozable sen si.[0] si.[1] None [ "coref"; getFeatureCorefClusters sen; getFeatureCorefClusterTotalWeight sen da; getFeatureCorefClusterBackwardWeight sen da; getFeatureCorefClusterForwardWeight sen da  ] )
+            |> Seq.mapi( fun i si -> GetModifiedNPClozable sen si.[0] si.[1] None [ "coref" |> Trace; getFeatureCorefClusters sen; getFeatureCorefClusterTotalWeight sen da; getFeatureCorefClusterBackwardWeight sen da; getFeatureCorefClusterForwardWeight sen da  ] )
         )
         //syntactic subj/obj
         clozable.AddRange(
@@ -242,7 +286,7 @@ let GetClozable ( da : DocumentAnnotation ) =
             |> Seq.filter( fun (i,d) -> d.Contains("obj") || d.Contains("subj") || d.Contains("root") ) //root for copula constructions
             //must be noun (catches edge cases of relative clauses) TODO: allow pronoun if resolved to referent
             |> Seq.filter( fun (i,d) -> sen.dep.pos.[i].StartsWith("N") ) // || sen.dep.pos.[i] = "PRP" )
-            |> Seq.map( fun (i,d) -> GetModifiedNPClozable sen i i (i|>Some) [ "dep";d; "@syntacticRole:" + d ] )
+            |> Seq.map( fun (i,d) -> GetModifiedNPClozable sen i i (i|>Some) [ "dep" |> Trace; d |> Trace;  d |> SyntacticRole] )
         )
         //srl
         clozable.AddRange(
@@ -255,7 +299,7 @@ let GetClozable ( da : DocumentAnnotation ) =
                 |> Seq.map( fun (g,gtSeq) ->
                     let start = (gtSeq |> Seq.minBy fst) |> fst
                     let stop = (gtSeq |> Seq.maxBy fst) |> fst
-                    GetModifiedNPClozable sen start stop None [ "srl";pred.description; "@semanticRole:" + g ])
+                    GetModifiedNPClozable sen start stop None [ "srl" |> Trace ; pred.description |> Trace;  g |> SemanticRole ])
             )
         )
 
@@ -428,16 +472,24 @@ let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) 
             |> Map.ofList
 
         //Item tagging: rank sentences by totalweight, group into sets of 30, then create map of sentence to importance tags
-        let importantItemMap =
+        let importantClozeMap =
             allClozableMap
-            |> Map.toList
-            |> List.sortByDescending( fun (sa,_) -> sa |>  GetTotalWeight allCloze.coreference )
-            |> List.windowed 30 //TODO arbitrary size here; need theoretical justification
-            |> List.mapi( fun i tupleList -> 
-                tupleList |> List.map( fun (sa,_) -> sa,i )
+            |> Map.toArray
+            |> Array.sortByDescending( fun (sa,_) -> sa |>  GetTotalWeight allCloze.coreference )
+            |> Array.collect( fun (sa,cl) -> cl |> List.toArray )
+            |> Array.chunkBySize 30 //TODO arbitrary size here; need theoretical justification
+            |> Array.mapi( fun i cl -> 
+                cl |> Array.map( fun cl -> cl,i )
             )
-            |> List.collect id
-            |> Map.ofList
+            |> Array.collect id
+            |> Map.ofArray
+            
+        // let test =
+        //     allClozableMap
+        //     |> Map.toArray
+        //     |> Array.sortByDescending( fun (sa,_) -> sa |>  GetTotalWeight allCloze.coreference )
+        //     |> Array.collect( fun (sa,cl) -> cl |> Array.ofList )
+        //     |> Array.windowed 30 //TODO arbitrary size here; need theoretical justification
 
         //Package for external API
         let input = inputJson |> ofJson<string[]>
@@ -451,14 +503,25 @@ let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) 
             | None -> sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = false} )
             | Some(clozables) -> 
                 sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
-                clozables |> Seq.iter( fun cl ->
-                    let tags = Array.append [| "weight:" + importantItemMap.[sa].ToString() |] cl.tags
+                clozables |> Seq.iter( fun cl -> 
+                    //append the weight group to our tags and convert the list of tags into an object literal
+                    let tags =  
+                        (importantClozeMap.[cl] |> WeightGroup) :: cl.tags @ cl.trace  
+                        |> List.choose( fun t ->   //filter junk tags
+                            match t with 
+                            | Deprecated(x) -> None 
+                            | Trace(x) -> None
+                            | _ -> Some(t) )
+                        |> keyValueList CaseRules.LowerFirst
                     let cloze,correctResponse = MakeItem sa cl
                     //insert any alternative correct responses here
                     let correctResponses = 
                         match acronymMap.TryFind(correctResponse) with
-                        | Some( acronym ) -> correctResponse + "|" + acronym + if doTrace then "~" + (cl.trace |> String.concat "~") else ""
-                        | None -> correctResponse + if doTrace then "~" + (cl.trace |> String.concat "~") else ""
+                        | Some( acronym ) -> correctResponse + "|" + acronym // + if doTrace then "~" + (cl.trace |> String.concat "~") else ""
+                        | None -> correctResponse //+ if doTrace then "~" + (cl.trace |> String.concat "~") else ""
+                    //construct tags here
+
+                    
                     clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash cloze; correctResponse = correctResponses; tags=tags} ) //TODO tags
                 )
             )

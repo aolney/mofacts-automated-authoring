@@ -226,7 +226,7 @@ let GetNLP( chunksJson : string) =
             chunkSentences 
             |> Array.mapi ( fun i chunk -> 
                 chunk |> Array.map( fun sen -> 
-                    [| "chunk:" + i.ToString(); "default:default" |] ,sen  ) 
+                    [| "OrderGroup:" + i.ToString() |] ,sen  ) 
             ) 
             |> Array.collect id //flatten to single list of sentences
             |> Array.unzip // unzip to parallel lists of tags and sentences
