@@ -40,6 +40,7 @@ type Service =
   | NLP 
   | AllCloze
   | SelectCloze
+  | Triples
 
 type Model = 
   {
@@ -114,6 +115,7 @@ let update msg (model:Model) =
       | Reverse -> ClozeAPI.DoSimpleComputation >> AllenNLP.Promisify
       | AllCloze -> ClozeAPI.GetAllCloze model.JsonInput
       | SelectCloze -> ClozeAPI.GetSelectCloze model.JsonInput (ParseIntOption <| model.DesiredSentences)  (ParseIntOption <| model.DesiredItems) true //replace with 'false' for normal operation
+      | Triples -> Triples.GetTriples model.JsonInput
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -193,6 +195,7 @@ let view model dispatch =
                 select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ] [ 
                   option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
                   option [ Value Service.AllCloze ] [ str "Get All Cloze" ]
+                  option [ Value Service.Triples ] [ str "Triples" ]
                   option [ Value Service.NLP ] [ str "Composite NLP" ]
                   option [ Value Service.SRL ] [ str "SRL Parse" ]
                   option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
