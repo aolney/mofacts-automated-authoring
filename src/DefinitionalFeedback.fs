@@ -147,7 +147,7 @@ let GenerateFeedback incorrectAnswer correctAnswer =
     | Some( incorrectEntry ), Some( correctEntry ) -> 
         firstLetterUpper( incorrectAnswerSpellingMatch ) + " is not right. The right answer is " + correctAnswer  + ". " +
         "The difference is that " + getDeterminerPhrase( incorrectAnswerSpellingMatch )  + " " + getPredicate( incorrectEntry ) + 
-        " and " + getDeterminerPhrase( correctAnswer ) + " " + getPredicate( correctEntry ) + "."
+        ", and " + getDeterminerPhrase( correctAnswer ) + " " + getPredicate( correctEntry ) + "."
     | _ -> null
 
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API
