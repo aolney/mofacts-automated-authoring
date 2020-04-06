@@ -311,13 +311,13 @@ let badSentenceRegex = System.Text.RegularExpressions.Regex( "(figure|table|sect
 
 /// Generates clozables for every sentence when given a block of text and an optional JSON of DocumentAnnotation (a serialized parse)
 /// NOTE: input may be empty if serialized parse is passed in.
-let GetAllCloze (nlpJsonOption: string option) ( inputJson : string ) =
+let GetAllCloze (nlpJsonOption: string option) ( jsonTextArray : string ) =
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
         let! nlp = 
             match nlpJsonOption with
             | Some(nlpJson) -> nlpJson |> Promisify |> Promise.map snd 
-            | None -> inputJson |> GetNLP |> Promise.map snd 
+            | None -> jsonTextArray |> GetNLP |> Promise.map snd 
         let da = nlp |> ofJson<DocumentAnnotation>
 
         //Make clozables for every sentence (not efficient, but useful for research)
@@ -386,9 +386,9 @@ let GetAcronymMap input =
 /// Returns select clozables given a target number by ranking clozables and returning top ranked.
 /// Since target numbers may be impossible to satisfy, does not guarantee returning the target quantities.
 /// NOTE: input is json string[] and must always match serialized parse b/c input is used to build acronym map (TODO CHANGE?)
-let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) (itemCountOption: int option) (doTrace : bool) (inputJson : string) = 
+let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) (itemCountOption: int option) (doTrace : bool) (jsonTextArray : string) = 
     promise{
-        let! allClozeJson = inputJson |> GetAllCloze nlpOption |> Promise.map snd 
+        let! allClozeJson = jsonTextArray |> GetAllCloze nlpOption |> Promise.map snd 
         let allCloze = allClozeJson |> ofJson<InternalAPI>
         
           //Estimate how many items we want if this wasn't specified
@@ -492,7 +492,7 @@ let GetSelectCloze (nlpOption: string option) (sentenceCountOption: int option) 
         //     |> Array.windowed 30 //TODO arbitrary size here; need theoretical justification
 
         //Package for external API
-        let input = inputJson |> ofJson<string[]>
+        let input = jsonTextArray |> ofJson<string[]>
         let acronymMap = input |> String.concat " " |> GetAcronymMap |> ofJson<Map<string,string>> 
         let sentences = ResizeArray<SentenceAPI>()
         let clozes = ResizeArray<ClozableAPI>()

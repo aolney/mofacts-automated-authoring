@@ -3,8 +3,12 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="SpellingCorrector.fs" />
+    <Compile Include="DefinitionalFeedback.fs" />
     <Compile Include="WordFrequency.fs" />
     <Compile Include="AllenNLP.fs" />
+    <Compile Include="DependencyCollapser.fs" />
+    <Compile Include="Triples.fs" />
     <Compile Include="ClozeAPI.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
