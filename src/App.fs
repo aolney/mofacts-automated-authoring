@@ -41,6 +41,9 @@ type Service =
   | AllCloze
   | SelectCloze
   | Triples
+  | DefinitionalFeedback
+  | InitializeDefinitionalFeedback
+  | InitializeSpellingCorrector
 
 type Model = 
   {
@@ -68,9 +71,9 @@ type Msg =
     | ServiceResult of int * string
     | ServiceChange of Service
     | DownloadJson
-    | LoadParseFile of Browser.Types.FileList
-    | SetParseJson of string
-    | ClearParse
+    | LoadJsonFile of Browser.Types.FileList
+    | SetJson of string
+    | ClearJson
     | UpdateSentences of string
     | UpdateItems of string
     // | ErrorResult of int * string
@@ -116,6 +119,9 @@ let update msg (model:Model) =
       | AllCloze -> ClozeAPI.GetAllCloze model.JsonInput
       | SelectCloze -> ClozeAPI.GetSelectCloze model.JsonInput (ParseIntOption <| model.DesiredSentences)  (ParseIntOption <| model.DesiredItems) true //replace with 'false' for normal operation
       | Triples -> Triples.GetTriples model.JsonInput
+      | DefinitionalFeedback -> DefinitionalFeedback.HarnessGenerateFeedback
+      | InitializeDefinitionalFeedback -> DefinitionalFeedback.HarnessInitialize model.JsonInput
+      | InitializeSpellingCorrector -> SpellingCorrector.HarnessInitialize model.JsonInput
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -139,15 +145,15 @@ let update msg (model:Model) =
       a.setAttribute("download", filename );
       a.click()
       ( model,[] )
-  | LoadParseFile(fileList) -> 
+  | LoadJsonFile(fileList) -> 
       let fileReadCommand dispatch =
         let fileReader = Browser.Dom.FileReader.Create ()
-        fileReader.onload <- fun _ -> fileReader.result |> unbox<string> |> SetParseJson |> dispatch
+        fileReader.onload <- fun _ -> fileReader.result |> unbox<string> |> SetJson |> dispatch
         fileReader.readAsText fileList.[0]
       ( model, [fileReadCommand] )
-  | SetParseJson(json) ->
+  | SetJson(json) ->
     ( { model with JsonInput = Some(json)}, [])
-  | ClearParse ->
+  | ClearJson ->
     ( { model with JsonResult = ""; JsonInput = None}, [] )
   | UpdateSentences(input)->
     ( { model with DesiredSentences=input}, [] )
@@ -195,6 +201,9 @@ let view model dispatch =
                 select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ] [ 
                   option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
                   option [ Value Service.AllCloze ] [ str "Get All Cloze" ]
+                  option [ Value Service.DefinitionalFeedback ] [ str "Definitional Feedback" ]
+                  option [ Value Service.InitializeDefinitionalFeedback ] [ str "Initialize Definitional Feedback" ]
+                  option [ Value Service.InitializeSpellingCorrector ] [ str "Initialize Spelling Corrector" ]
                   option [ Value Service.Triples ] [ str "Triples" ]
                   option [ Value Service.NLP ] [ str "Composite NLP" ]
                   option [ Value Service.SRL ] [ str "SRL Parse" ]
@@ -208,12 +217,17 @@ let view model dispatch =
               ]
             ]
           ]
-          div [ Hidden ( model.Service <> Service.SelectCloze && model.Service <> Service.AllCloze ) ] [
-            Label.label [ ] [ str "Optional Parse" ]
+          div [ Hidden ( 
+                        model.Service <> Service.SelectCloze && 
+                        model.Service <> Service.AllCloze && 
+                        model.Service <> Service.DefinitionalFeedback &&
+                        model.Service <> Service.InitializeDefinitionalFeedback &&
+                        model.Service <> Service.InitializeSpellingCorrector)] [
+            Label.label [ ] [ str "Optional JSON (e.g. parse)" ]
             Fulma.File.file [ 
                 Fulma.File.HasName 
                 //Key allows us to reload a file after clearing it
-                Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadParseFile !!ev.target?files  |> dispatch ) ] 
+                Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadJsonFile !!ev.target?files  |> dispatch ) ] 
                 ] [ 
                 Fulma.File.label [ ] [ 
                   Fulma.File.input [ Props [ Accept ".json" ]]
@@ -223,12 +237,12 @@ let view model dispatch =
                         Fa.i [ Fa.Solid.Upload ] []
                         ]
                     ]
-                    Fulma.File.label [ ] [ str "Load Parse" ] ]
+                    Fulma.File.label [ ] [ str "Load JSON" ] ]
                   Fulma.File.name [ ] [ str (match model.JsonInput with | Some(_) -> "Status: Loaded" | None -> "Status: Empty" ) ] 
                   Button.button [ 
                     Button.Color IsPrimary
-                    Button.OnClick (fun _ -> dispatch ClearParse )
-                    ] [ str "Clear Parse" ]
+                    Button.OnClick (fun _ -> dispatch ClearJson )
+                    ] [ str "Clear JSON" ]
                 ] 
               ] 
           ]
