@@ -141,7 +141,9 @@ type FeedbackRequest =
 
 /// Generates simple definitional feedback given a json object representing a FeedbackRequest
 let GenerateFeedback incorrectAnswer correctAnswer =
-    let incorrectAnswerSpellingMatch = incorrectAnswer |> CorrectSpelling
+    //TODO: check why this seems to require 8GB of RAM
+    //let incorrectAnswerSpellingMatch = incorrectAnswer |> CorrectSpelling
+    let incorrectAnswerSpellingMatch = incorrectAnswer
 
     match definitionMap.TryFind( incorrectAnswerSpellingMatch ), definitionMap.TryFind( correctAnswer ) with
     | Some( incorrectEntry ), Some( correctEntry ) -> 
