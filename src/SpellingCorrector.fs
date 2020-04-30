@@ -16,19 +16,23 @@ let mutable NWORDS = Map.empty
 
 /// Call to initialize the spelling corrector, passing in unstructured text
 let Initialize ( text : string) =
-    NWORDS <-  
-        text |> (Regex "[a-zA-Z]+").Matches |> Seq.cast 
-        |> Seq.map (fun (m:Match) -> m.Value.ToLower()) |> Seq.countBy id |> Map.ofSeq
-
+    try
+        NWORDS <-  
+            text |> (Regex "[a-zA-Z]+").Matches |> Seq.cast 
+            |> Seq.map (fun (m:Match) -> m.Value.ToLower()) |> Seq.countBy id |> Map.ofSeq
+        promise{ return Ok( null ) }
+    with
+    | e -> promise{ return Error( e.Message ) }
+    
 /// This function should only be called by the test harness GUI. It wraps Initialize to match the test harness API
-let HarnessInitialize ( textOption : string option ) ( _ : string) =
-    promise {
-        match textOption with
-        | Some(text) -> 
-            text |> Initialize
-            return 1, "{}"
-        | None -> return 0, """{"message":"missing raw text file defining correctly spelled words"}"""
-    }
+// let HarnessInitialize ( textOption : string option ) ( _ : string) =
+//     promise {
+//         match textOption with
+//         | Some(text) -> 
+//             text |> Initialize
+//             return "ok", "{}"
+//         | None -> return "error", """{"message":"missing raw text file defining correctly spelled words"}"""
+//     }
 
 let knownEdits2 word = [for e1 in edits1(word) do for e2 in edits1(e1) do if Map.containsKey e2 NWORDS then yield e2] |> Set.ofList
 let known words = [for w in words do if Map.containsKey w NWORDS then yield w] |> Set.ofList

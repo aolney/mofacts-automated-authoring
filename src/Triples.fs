@@ -11,7 +11,7 @@ open Fable.Core
 open Fable.Core.JsInterop
 open Thoth.Json //for Json; might be cleaner way
 //TODO: possibly replace with this: https://github.com/thoth-org/Thoth.Fetch
-open Fable.SimpleHttp
+// open Fable.SimpleHttp
 open AllenNLP
 open DependencyCollapser
 
@@ -42,7 +42,7 @@ type Triple =
 type InternalAPI =
     {
         sentences : SentenceAnnotation[]
-        coreference : CoreferenceResult
+        coreference : Coreference
         triples : Triple[][]
     }
 
@@ -233,17 +233,22 @@ let triplesFromSentence ( sa : SentenceAnnotation ) =
         )
     )
 
-let GetTriples (nlpJsonOption: string option) ( inputJson : string ) =
+/// Returns triples; accepts a serialized NLP object option, a chunksJson option, and an inputText 
+let GetTriples (nlpJsonOption: string option) ( chunksJsonOption : string option) ( inputText : string ) =
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
-        let! nlp = 
+        let! nlpResult = 
             match nlpJsonOption with
-            | Some(nlpJson) -> nlpJson |> Promisify |> Promise.map snd 
-            | None -> inputJson |> GetNLP |> Promise.map snd 
-        let da = nlp |> ofJson<DocumentAnnotation>
+            | Some(nlpJson) -> nlpJson |> ofJson<DocumentAnnotation> |> Promisify 
+            | None -> GetNLP chunksJsonOption inputText
 
-        //Make triples for every sentence 
-        let (triples : Triple[][]) = da.sentences |> Array.map triplesFromSentence
-
-        return 1, {sentences = da.sentences; coreference = da.coreference; triples = triples} |> toJson
+        match nlpResult with
+        | Ok(da) ->
+            //Make triples for every sentence 
+            let (triples : Triple[][]) = da.sentences |> Array.map triplesFromSentence
+      
+            let apiResponse = {sentences = da.sentences; coreference = da.coreference; triples = triples}
+            return Ok( apiResponse )
+        | Error(e) -> 
+            return Error(e)
     }
