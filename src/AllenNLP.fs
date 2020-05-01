@@ -5,9 +5,9 @@ open Fable.Core
 open Fable.Core.JsInterop
 open Thoth.Json 
 open Thoth.Fetch
-//for Json; might be cleaner way
-//TODO: possibly replace with this: https://github.com/thoth-org/Thoth.Fetch
-// open Fable.SimpleHttp
+
+//for node compatibility
+importSideEffects "isomorphic-fetch"
 
 //Fable 2 transition 
 let inline toJson x = Encode.Auto.toString(4, x)
@@ -146,15 +146,14 @@ type TextRequest =
 let endpoints =
     {
         //http requires on-campus IP address
-        SRL = "http://141.225.12.235:8002/predict/semantic-role-labeling"
-        Coreference = "http://141.225.12.235:8002/predict/coreference-resolution"
-        DependencyParser = "http://141.225.12.235:8002/predict/dependency-parsing"
-        SentenceSplitter = "http://141.225.12.235:8001/sents"
-        // TODO: every once and a while getting a bogus cors error from caddy, but suspect it is due to caddy getting flooded
-        // SRL = "https://allennlp.olney.ai/predict/semantic-role-labeling"
-        // Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
-        // DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
-        // SentenceSplitter = "https://spacy.olney.ai/sents"
+        // SRL = "http://141.225.12.235:8002/predict/semantic-role-labeling"
+        // Coreference = "http://141.225.12.235:8002/predict/coreference-resolution"
+        // DependencyParser = "http://141.225.12.235:8002/predict/dependency-parsing"
+        // SentenceSplitter = "http://141.225.12.235:8001/sents"
+        SRL = "https://allennlp.olney.ai/predict/semantic-role-labeling"
+        Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
+        DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
+        SentenceSplitter = "https://spacy.olney.ai/sents"
     }
 
 /// Function template for POSTs. 
@@ -182,21 +181,23 @@ let endpoints =
 let GetCoreference( input: string ) : JS.Promise<Result<Coreference,FetchError>> =
     // PostAPI { document = input } endpoints.Coreference "application/json"
     promise {
-        return! Fetch.tryPost( endpoints.Coreference , input, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( endpoints.Coreference , { document = input }, caseStrategy = SnakeCase)
     }
 
 ///Get SRL from AllenNLP.
 let GetSRL( input: string ) : JS.Promise<Result<SRL,FetchError>> =
     // PostAPI { sentence = input } endpoints.SRL "application/json"
     promise {
-        return! Fetch.tryPost( endpoints.SRL , input, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( endpoints.SRL , { sentence = input }, caseStrategy = SnakeCase)
     }
 
 ///Get a parse from AllenNLP.
 let GetDependencyParse( input: string ) : JS.Promise<Result<DependencyParse,FetchError>> =
     // PostAPI { sentence = input } endpoints.DependencyParser "application/json"
     promise {
-        return! Fetch.tryPost( endpoints.DependencyParser , input, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( endpoints.DependencyParser , { sentence = input }, caseStrategy = SnakeCase)
+        // return! Fetch.tryPost( endpoints.DependencyParser , input, properties = [Fetch.Types.RequestProperties.Mode Fetch.Types.RequestMode.Cors], caseStrategy = SnakeCase)
+        
     }
 
 ///Get split sentences from Spacy. HACK: passing in this encoding to avoid CORS preflight 
@@ -204,7 +205,8 @@ let GetSentences( input: string ) : JS.Promise<Result<string[],FetchError>> =
     // PostAPI { text = input; model = "en" } endpoints.SentenceSplitter "text/plain"
     promise {
         // return! Fetch.tryPost( endpoints.SentenceSplitter , input, properties = [Fetch.Types.RequestProperties.Mode Fetch.Types.RequestMode.Cors], headers = [Fetch.Types.HttpRequestHeaders.ContentType "text/plain"], caseStrategy = SnakeCase)
-        return! Fetch.tryPost( endpoints.SentenceSplitter , input, caseStrategy = SnakeCase)
+        // return! Fetch.tryPost( endpoints.SentenceSplitter , input, properties = [Fetch.Types.RequestProperties.Mode Fetch.Types.RequestMode.Cors], caseStrategy = SnakeCase)
+        return! Fetch.tryPost( endpoints.SentenceSplitter , { text = input; model = "en" }, caseStrategy = SnakeCase)
     }
 
 ///Call services with sentences to generate a seq of promises; remap to promise of seq

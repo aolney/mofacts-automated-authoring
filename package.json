@@ -22,6 +22,7 @@
     "@babel/runtime-corejs2": "^7.0.0",
     "@fortawesome/fontawesome-free": "^5.8.1",
     "bulma": "^0.5.2",
+    "isomorphic-fetch": "^2.2.1",
     "react": "^16.8.4",
     "react-dom": "^16.8.4",
     "transliteration": "^2.1.7"
@@ -40,7 +41,6 @@
     "file-loader": "^4.0.0",
     "gh-pages": "^2.0.1",
     "html-webpack-plugin": "^3.2.0",
-    "isomorphic-fetch": "^2.2.1",
     "jsdom": "^15.1.0",
     "jsdom-global": "^3.0.2",
     "loglevel": "^1.5.0",
