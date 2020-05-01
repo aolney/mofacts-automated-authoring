@@ -26,6 +26,11 @@ let inline ofJson<'T> json = Decode.Auto.unsafeFromString<'T>(json)
 
 // () delimit the start/edn of the definitions for example purposes
 
+type Feedback =
+    {
+        feedback : string
+    }
+
 /// Defines an entry in our glossary. Tagging is needed for surface realization.
 type EntryGloss =
     {
@@ -50,35 +55,40 @@ let mutable wordSet = Set.empty
 /// Initialize the definition dictionary using a JSON object of string*EntryGloss
 /// Construct the determiner map with this information
 let Initialize jsonDictionary =
-    definitionMap <- jsonDictionary |> ofJson<Map<string,EntryGloss>>
-    wordSet <- definitionMap |> Map.toSeq |> Seq.collect( fun (k,v) -> v.gloss |> Array.map lower ) |> Set.ofSeq
+    try
+        definitionMap <- jsonDictionary |> ofJson<Map<string,EntryGloss>>
+        wordSet <- definitionMap |> Map.toSeq |> Seq.collect( fun (k,v) -> v.gloss |> Array.map lower ) |> Set.ofSeq
 
-    //Use only the first word of an entry when looking for determiner matches; may be too strong an assumption
-    let entryFirstWordSet = definitionMap |> Map.toSeq |> Seq.map( fun (k,v) -> v.entry.[0].ToLower() ) |> Set.ofSeq
-    determinerMap <-
-        definitionMap
-        |> Map.toSeq
-        |> Seq.collect( fun (k,v) -> Seq.zip (v.gloss |> Array.map lower) v.glossTag )
-        |> Seq.pairwise
-        |> Seq.choose( fun ( (w1,t1),(w2,t2) ) ->
-            match t1,entryFirstWordSet.Contains(w2) with
-            | "DT", true -> Some(w2,w1) //entry first word and determiner
-            | _ -> None
-        )
-        |> Seq.groupBy fst
-        //Get the most frequent determiner
-        |> Seq.map( fun (ent,detTuples) -> ent, detTuples |> Seq.countBy snd |> Seq.maxBy snd |> fst )
-        |> Map.ofSeq
+        //Use only the first word of an entry when looking for determiner matches; may be too strong an assumption
+        let entryFirstWordSet = definitionMap |> Map.toSeq |> Seq.map( fun (k,v) -> v.entry.[0].ToLower() ) |> Set.ofSeq
+        determinerMap <-
+            definitionMap
+            |> Map.toSeq
+            |> Seq.collect( fun (k,v) -> Seq.zip (v.gloss |> Array.map lower) v.glossTag )
+            |> Seq.pairwise
+            |> Seq.choose( fun ( (w1,t1),(w2,t2) ) ->
+                match t1,entryFirstWordSet.Contains(w2) with
+                | "DT", true -> Some(w2,w1) //entry first word and determiner
+                | _ -> None
+            )
+            |> Seq.groupBy fst
+            //Get the most frequent determiner
+            |> Seq.map( fun (ent,detTuples) -> ent, detTuples |> Seq.countBy snd |> Seq.maxBy snd |> fst )
+            |> Map.ofSeq
 
-/// This function should only be called by the test harness GUI. It wraps Initialize to match the test harness API
-let HarnessInitialize ( jsonOption : string option) ( _ : string) =
-    promise {
-        match jsonOption with
-        | Some(json) -> 
-            json |> Initialize
-            return 1, "{}"
-        | None -> return 0, """{"message":"missing dictionary of EntryGloss"}"""
-    }
+        promise{ return Ok( null ) }
+    with
+    | e -> promise{ return Error( e.Message ) }
+
+// /// This function should only be called by the test harness GUI. It wraps Initialize to match the test harness API
+// let HarnessInitialize ( jsonOption : string option) ( _ : string) =
+//     promise {
+//         match jsonOption with
+//         | Some(json) -> 
+//             json |> Initialize
+//             return "ok", "{}"
+//         | None -> return "error", """{"message":"missing dictionary of EntryGloss"}"""
+//     }
 
 let isAcronym ( word : string ) = word = word.ToUpper() 
 
@@ -141,22 +151,22 @@ type FeedbackRequest =
 
 /// Generates simple definitional feedback given a json object representing a FeedbackRequest
 let GenerateFeedback incorrectAnswer correctAnswer =
-    //TODO: check why this seems to require 8GB of RAM
-    //let incorrectAnswerSpellingMatch = incorrectAnswer |> CorrectSpelling
-    let incorrectAnswerSpellingMatch = incorrectAnswer
+    promise {
+        //TODO: check why this seems to require 8GB of RAM
+        //let incorrectAnswerSpellingMatch = incorrectAnswer |> CorrectSpelling
+        let incorrectAnswerSpellingMatch = incorrectAnswer
 
-    match definitionMap.TryFind( incorrectAnswerSpellingMatch ), definitionMap.TryFind( correctAnswer ) with
-    | Some( incorrectEntry ), Some( correctEntry ) -> 
-        firstLetterUpper( incorrectAnswerSpellingMatch ) + " is not right. The right answer is " + correctAnswer  + ". " +
-        "The difference is that " + getDeterminerPhrase( incorrectAnswerSpellingMatch )  + " " + getPredicate( incorrectEntry ) + 
-        ", and " + getDeterminerPhrase( correctAnswer ) + " " + getPredicate( correctEntry ) + "."
-    | _ -> null
+        let feedback =
+            match definitionMap.TryFind( incorrectAnswerSpellingMatch ), definitionMap.TryFind( correctAnswer ) with
+            | Some( incorrectEntry ), Some( correctEntry ) -> 
+                firstLetterUpper( incorrectAnswerSpellingMatch ) + " is not right. The right answer is " + correctAnswer  + ". " +
+                "The difference is that " + getDeterminerPhrase( incorrectAnswerSpellingMatch )  + " " + getPredicate( incorrectEntry ) + 
+                ", and " + getDeterminerPhrase( correctAnswer ) + " " + getPredicate( correctEntry ) + "."
+            | _ -> null
+        return Ok( {feedback = feedback } )
+    }
 
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API
 let HarnessGenerateFeedback jsonFeedbackRequest =
-    promise {
-        let fr = jsonFeedbackRequest |> ofJson<FeedbackRequest>
-        let feedback = GenerateFeedback fr.IncorrectAnswer fr.CorrectAnswer
-
-        return 1, "{feedback:" + feedback + "}"
-    } 
+    let fr = jsonFeedbackRequest |> ofJson<FeedbackRequest>
+    GenerateFeedback fr.IncorrectAnswer fr.CorrectAnswer

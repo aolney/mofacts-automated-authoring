@@ -68,7 +68,7 @@ type Model =
 type Msg =
     | UpdateText of string
     | CallService
-    | ServiceResult of int * string
+    | ServiceResult of string * string
     | ServiceChange of Service
     | DownloadJson
     | LoadJsonFile of Browser.Types.FileList
@@ -97,37 +97,46 @@ let ParseIntOption s =
    | (true,int) -> Some(int)
    | _ -> None
 
+/// Convert a Thoth.Fetch Result into a wrapped string tuple: (status,payload)
+let inline makeServiceResult ( result : Result<'t,'e> ) =
+  match result with
+  | Ok(r:'t) -> ServiceResult( "ok", Encode.Auto.toString(4, r ) )
+  | Error(e) -> ServiceResult( "error", e.ToString() ) //could unpack various error types if desired https://thoth-org.github.io/Thoth.Fetch/
+
 let update msg (model:Model) =
   match msg with
   | UpdateText(input) ->
     ( {model with InputText=input}, [])
   | CallService ->
-    //Debug site
-    let test = [| "1"; "a" |] |> toJson
 
-    //Test a service; we select here based on what's in the model
-    let service = 
+    /// Assumes all services accept a single input; additional arguments must be curried before calling
+    let makeCmd serviceCall input resultWrapper = 
+      Cmd.OfPromise.perform serviceCall input ( fun result -> result |> resultWrapper ) 
+
+    /// Because different services emit different types, but all must resolve to the same type here, uses functions above to simplify construction
+    let cmd =
       match model.Service with
-      | SRL -> AllenNLP.GetSRL
-      | DependencyParser -> AllenNLP.GetDependencyParse
-      | Coreference -> AllenNLP.GetCoreference
-      | SentenceSplitter -> AllenNLP.GetSentences
-      | CleanText -> AllenNLP.CleanText >> AllenNLP.Promisify
-      | NLP -> AllenNLP.GetNLP
-      | Acronym -> ClozeAPI.GetAcronymMap >> AllenNLP.Promisify
-      | Reverse -> ClozeAPI.DoSimpleComputation >> AllenNLP.Promisify
-      | AllCloze -> ClozeAPI.GetAllCloze model.JsonInput
-      | SelectCloze -> ClozeAPI.GetSelectCloze model.JsonInput (ParseIntOption <| model.DesiredSentences)  (ParseIntOption <| model.DesiredItems) true //replace with 'false' for normal operation
-      | Triples -> Triples.GetTriples model.JsonInput
-      | DefinitionalFeedback -> DefinitionalFeedback.HarnessGenerateFeedback
-      | InitializeDefinitionalFeedback -> DefinitionalFeedback.HarnessInitialize model.JsonInput
-      | InitializeSpellingCorrector -> SpellingCorrector.HarnessInitialize model.JsonInput
+      | SRL -> makeCmd AllenNLP.GetSRL model.InputText makeServiceResult
+      | DependencyParser -> makeCmd AllenNLP.GetDependencyParse model.InputText makeServiceResult
+      | Coreference -> makeCmd AllenNLP.GetCoreference model.InputText makeServiceResult
+      | SentenceSplitter -> makeCmd AllenNLP.GetSentences model.InputText makeServiceResult
+      | CleanText -> makeCmd (AllenNLP.CleanText >> AllenNLP.Promisify) model.InputText makeServiceResult
+      | NLP -> makeCmd (AllenNLP.GetNLP model.JsonInput) model.InputText makeServiceResult
+      | Acronym -> makeCmd (ClozeAPI.GetAcronymMap >> AllenNLP.Promisify) model.InputText makeServiceResult
+      | Reverse -> makeCmd (ClozeAPI.DoSimpleComputation >> AllenNLP.Promisify) model.InputText makeServiceResult
+      // Note we pass no chunks; input is used as a singleton chunk instead
+      | AllCloze -> makeCmd (ClozeAPI.GetAllCloze model.JsonInput None) model.InputText makeServiceResult
+      // Note we pass no chunks; input is used as a singleton chunk instead; "true" provides trace information
+      | SelectCloze -> makeCmd (ClozeAPI.GetSelectCloze model.JsonInput (ParseIntOption <| model.DesiredSentences) (ParseIntOption <| model.DesiredItems) true None ) model.InputText makeServiceResult
+      // Note we pass no chunks; input is used as a singleton chunk instead
+      | Triples -> makeCmd (Triples.GetTriples model.JsonInput None) model.InputText makeServiceResult  
+      | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
+      | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
+      | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
-      {model with Status=""}, 
-      //[]
-      Cmd.OfPromise.perform service model.InputText ( fun result -> result |> ServiceResult )
+      {model with Status=""}, cmd
     )
   | ServiceResult(code,json)->
     //for debug: chrome is freezing up, so trying to dump non-essential fields from the model
