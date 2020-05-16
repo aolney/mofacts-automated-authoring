@@ -35,6 +35,7 @@ type Endpoints =
         Coreference : string
         DependencyParser : string
         SentenceSplitter : string
+        TextualEntailment : string
     }
 
 ///////////////////////////////////////////////////////////////////////
@@ -120,6 +121,15 @@ type DocumentAnnotation =
         coreference : Coreference
     }
 
+type Entailment =
+    {
+        h2p_attention : float[][]
+        hypothesis_tokens : string[]
+        label_logits : float[]
+        label_probs : float[]
+        p2h_attention : float[][]
+        premise_tokens : string[]
+    }
 
 ///////////////////////////////////////////////////////////////////////
 /// REQUESTS
@@ -142,6 +152,13 @@ type TextRequest =
         model : string
     }
 
+//AllenNLP request where hypothesis and premise strings are sent
+type EntailmentRequest =
+    {
+        hypothesis : string
+        premise : string
+    }
+
 ///Endpoints for NLP services
 let endpoints =
     {
@@ -154,6 +171,8 @@ let endpoints =
         Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
         DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
         SentenceSplitter = "https://spacy.olney.ai/sents"
+        TextualEntailment = "https://allennlp.olney.ai/predict/textual-entailment"
+        
     }
 
 /// Function template for POSTs. 
@@ -214,6 +233,12 @@ let GetForSentences (service: string -> JS.Promise<Result<'t,FetchError>>) (sent
     sentences 
     |> Seq.map( fun sentence -> sentence |> service )
     |> Promise.all
+
+///Get a textual entailment from AllenNLP.
+let GetTextualEntailment( premise: string ) (hypothesis :string): JS.Promise<Result<DependencyParse,FetchError>> =
+    promise {
+        return! Fetch.tryPost( endpoints.TextualEntailment, { hypothesis = hypothesis; premise=premise }, caseStrategy = SnakeCase)       
+    }
 
 let RegexReplace (pattern : string) (replacement:string) (input:string) =
     System.Text.RegularExpressions.Regex.Replace( input, pattern, replacement )
@@ -331,3 +356,67 @@ let GetNLP( chunksJsonOption : string option ) ( inputText : string )=
             //return "error", formattedErrors |> String.concat "\n"
             return Error(errorPayload |> String.concat "\n")
     }
+
+///////////////////////////////////////////////////////////////////////
+/// Post processing
+/// ///////////////////////////////////////////////////////////////////
+
+let collapseDependencies (sa : SentenceAnnotation) = 
+    let ruleTokens = 
+        sa.dep.words 
+        |> Array.mapi( fun i w -> 
+            DependencyCollapser.Rules.Token.Create( i, w, sa.dep.pos.[i], sa.dep.predicted_dependencies.[i], sa.dep.predicted_heads.[i])
+        ) |> Array.toList
+
+    let dependencies, dependenciesCC = DependencyCollapser.Collapser.CollapseTokens( ruleTokens )
+    //
+    dependenciesCC
+
+/// Get a list of dependent indices from start index
+let getDependentIndices ( start : int ) ( sa : SentenceAnnotation ) =
+    let dependents = ResizeArray<int>()
+    for h in sa.dep.predicted_heads do
+        let mutable hbar = h
+        while hbar <> start && hbar <> 0 do
+            hbar <- sa.dep.predicted_heads.[hbar]
+        if hbar = start then dependents.Add(h)
+    //
+    dependents.ToArray()
+
+/// Convert SRL BIO tags to a map with key as tag without BIO prefix and value a list of tag/index tuples for that tag
+let srlArgToIndexMap (srlTags : string[]) =
+    srlTags 
+    |> Array.mapi( fun i t -> t.Substring( t.IndexOf("-") ),i)
+    |> Array.groupBy fst
+    |> Map.ofArray
+
+// NOTE: A more direct, though simplified, version of CGA3 follows
+/// Get the subject predicate index of the parse
+/// Had to modify from LTH b/c of different formalism
+/// NSUBJ seems pretty reliable but can sometimes be WH: It was John who (nsubj) came ; in this case "It" is chosen
+/// OLD method backed off to first noun in sentence on failure; for now we prefer to fail without a kludge
+let getSubjectIndex ( sa : SentenceAnnotation ) = 
+    let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
+    //the first nsubj preceding the root
+    sa.dep.predicted_dependencies.[0 .. rootIndex] |> Array.tryFindIndexBack( fun h -> h = "nsubj") 
+
+/// Returns the index of a "be" or copular verb when it can be viewed as the root (anti Stanford, which views copular complement as root)
+/// This check subsumes verb chaining because verb chains are broken and otherwise marked as "aux" rather than "cop"
+let getBeRootIndex ( sa : SentenceAnnotation ) =
+    let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
+    //the first copular child of the root
+    sa.dep.predicted_heads 
+    |> Array.tryFindIndex( fun h -> h = rootIndex && sa.dep.predicted_dependencies.[h] = "cop" )
+
+/// Get the root predicate index of the parse
+/// Had to modify from LTH b/c of different formalism
+/// If ROOT is VB, then take first DOBJ of ROOT : John kissed (root) Mary (dobj) on the head
+/// If ROOT is anything else, then take ROOT: It was John (root) who came ; Sally was happy (root) to see her
+let getPredicateIndex ( sa : SentenceAnnotation ) = 
+    let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
+    if sa.dep.pos.[rootIndex].StartsWith("VB") then
+        //the first child of the verb that is a dobj (starting from the beginning shouldn't matter)
+        sa.dep.predicted_heads 
+        |> Array.tryFindIndex( fun h -> h = rootIndex && sa.dep.predicted_dependencies.[h] = "dobj" )
+    else
+        rootIndex |> Some //TODO: SPAN WILL DOMINATE S

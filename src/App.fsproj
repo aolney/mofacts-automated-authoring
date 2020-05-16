@@ -6,10 +6,11 @@
     <Compile Include="SpellingCorrector.fs" />
     <Compile Include="DefinitionalFeedback.fs" />
     <Compile Include="WordFrequency.fs" />
-    <Compile Include="AllenNLP.fs" />
     <Compile Include="DependencyCollapser.fs" />
+    <Compile Include="AllenNLP.fs" />
     <Compile Include="Triples.fs" />
     <Compile Include="ClozeAPI.fs" />
+    <Compile Include="QuestionGenerator.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />

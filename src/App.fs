@@ -41,6 +41,7 @@ type Service =
   | AllCloze
   | SelectCloze
   | Triples
+  // | LemmInflect
   | DefinitionalFeedback
   | InitializeDefinitionalFeedback
   | InitializeSpellingCorrector

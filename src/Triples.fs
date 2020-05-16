@@ -13,7 +13,7 @@ open Thoth.Json //for Json; might be cleaner way
 //TODO: possibly replace with this: https://github.com/thoth-org/Thoth.Fetch
 // open Fable.SimpleHttp
 open AllenNLP
-open DependencyCollapser
+// open DependencyCollapser
 
 //-- Internal ------------------------------
 /// A tag such that we can create an object literal (a pojo) from a list of tags
@@ -50,16 +50,7 @@ type InternalAPI =
 
     
 
-let collapseDependencies (sa : SentenceAnnotation) = 
-    let ruleTokens = 
-        sa.dep.words 
-        |> Array.mapi( fun i w -> 
-            Rules.Token.Create( i, w, sa.dep.pos.[i], sa.dep.predicted_dependencies.[i], sa.dep.predicted_heads.[i])
-        ) |> Array.toList
 
-    let dependencies, dependenciesCC = Collapser.CollapseTokens( ruleTokens )
-    //
-    dependenciesCC
 
 // MIGRATION NOTES
 // 1. Heavily symbolic approach, complex sentences 
@@ -79,44 +70,7 @@ let collapseDependencies (sa : SentenceAnnotation) =
 // Allen uses PTB tags and standard Stanford dependencies (not universal) https://nlp.stanford.edu/software/dependencies_manual.pdf
 
 
-/// Get a list of dependent indices from start index
-let GetDependentNodes ( start : int ) ( sa : SentenceAnnotation ) =
-    let dependents = ResizeArray<int>()
-    for h in sa.dep.predicted_heads do
-        let mutable hbar = h
-        while hbar <> start && hbar <> 0 do
-            hbar <- sa.dep.predicted_heads.[hbar]
-        if hbar = start then dependents.Add(h)
-    //
-    dependents.ToArray()
 
-// NOTE: A more direct, though simplified, version of CGA3 follows
-// /// Get the subject predicate index of the parse
-// /// Had to modify from LTH b/c of different formalism
-// /// NSUBJ seems pretty reliable but can sometimes be WH: It was John who (nsubj) came ; in this case "It" is chosen
-// let SubjectNode ( sa : SentenceAnnotation ) = 
-//     let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
-//     //the first nsubj preceding the root
-//     sa.dep.predicted_dependencies.[0 .. rootIndex] |> Array.tryFindIndexBack( fun h -> h = "nsubj") 
-// /// Returns the index of a "be" or copular verb when it can be viewed as the root (anti Stanford, which views copular complement as root)
-// /// This check subsumes verb chaining because verb chains are broken and otherwise marked as "aux" rather than "cop"
-// let BeRoot ( sa : SentenceAnnotation ) =
-//     let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
-//     //the first copular child of the root
-//     sa.dep.predicted_heads 
-//     |> Array.tryFindIndex( fun h -> h = rootIndex && sa.dep.predicted_dependencies.[h] = "cop" )
-// /// Get the root predicate index of the parse
-// /// Had to modify from LTH b/c of different formalism
-// /// If ROOT is VB, then take first DOBJ of ROOT : John kissed (root) Mary (dobj) on the head
-// /// If ROOT is anything else, then take ROOT: It was John (root) who came ; Sally was happy (root) to see her
-// let PredicateNode ( sa : SentenceAnnotation ) = 
-//     let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
-//     if sa.dep.pos.[rootIndex].StartsWith("VB") then
-//         //the first child of the verb that is a dobj (starting from the beginning shouldn't matter)
-//         sa.dep.predicted_heads 
-//         |> Array.tryFindIndex( fun h -> h = rootIndex && sa.dep.predicted_dependencies.[h] = "dobj" )
-//     else
-//         rootIndex |> Some //TODO: SPAN WILL DOMINATE S
 // /// Returns if copula, subject, and predicate exist. **Heavily** simplified from LTH
 // let IsATripleDependencyOnly ( sa : SentenceAnnotation ) =
 //     let s = sa |> SubjectNode
@@ -132,12 +86,6 @@ let GetDependentNodes ( start : int ) ( sa : SentenceAnnotation ) =
 //         } |> Some
 //     | _ -> None
 
-/// Convert SRL BIO tags to a map with key the tag without BIO and value a list of tag/index tuples for that tag
-let srlArgToIndexMap (srlTags : string[]) =
-    srlTags 
-    |> Array.mapi( fun i t -> t.Substring( t.IndexOf("-") ),i)
-    |> Array.groupBy fst
-    |> Map.ofArray
 
 /// Convert SRL BIO tags to indices for start, edge, stop 
 /// Uses a simplistic assumption that lowest ARG is the start node and next ARG is the stop node
