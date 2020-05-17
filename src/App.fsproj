@@ -10,6 +10,7 @@
     <Compile Include="AllenNLP.fs" />
     <Compile Include="Triples.fs" />
     <Compile Include="ClozeAPI.fs" />
+    <Compile Include="LemmInflect.fs" />
     <Compile Include="QuestionGenerator.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
