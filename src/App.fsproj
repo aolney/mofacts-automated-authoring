@@ -12,6 +12,7 @@
     <Compile Include="ClozeAPI.fs" />
     <Compile Include="LemmInflect.fs" />
     <Compile Include="QuestionGenerator.fs" />
+    <Compile Include="TutorialDialogue.fs" />
     <Compile Include="App.fs" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />

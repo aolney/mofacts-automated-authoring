@@ -235,7 +235,7 @@ let GetForSentences (service: string -> JS.Promise<Result<'t,FetchError>>) (sent
     |> Promise.all
 
 ///Get a textual entailment from AllenNLP.
-let GetTextualEntailment( premise: string ) (hypothesis :string): JS.Promise<Result<DependencyParse,FetchError>> =
+let GetTextualEntailment( premise: string ) (hypothesis :string): JS.Promise<Result<Entailment,FetchError>> =
     promise {
         return! Fetch.tryPost( endpoints.TextualEntailment, { hypothesis = hypothesis; premise=premise }, caseStrategy = SnakeCase)       
     }
@@ -407,6 +407,13 @@ let getBeRootIndex ( sa : SentenceAnnotation ) =
     //the first copular child of the root
     sa.dep.predicted_heads 
     |> Array.tryFindIndex( fun h -> h = rootIndex && sa.dep.predicted_dependencies.[h] = "cop" )
+
+/// Returns the first aux for inversion; e.g. John has been eating pie -> What has John been eating?
+let getInvertAuxIndex ( sa : SentenceAnnotation ) =
+    let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
+    //the first copular child of the root
+    sa.dep.predicted_heads 
+    |> Array.tryFindIndex( fun h -> h = rootIndex && sa.dep.predicted_dependencies.[h] = "aux" )
 
 /// Get the root predicate index of the parse
 /// Had to modify from LTH b/c of different formalism

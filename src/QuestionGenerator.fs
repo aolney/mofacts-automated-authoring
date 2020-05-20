@@ -7,10 +7,13 @@ open Thoth.Json
 open Thoth.Fetch
 open AllenNLP
 
+///z/aolney/research_projects/braintrust/code/braintrust-ace-generator
+///z/aolney/repos/FreeformMapGenerator
 
 /// Replace indices in the parse with a string (which may be multiple words).
 /// Potentially a many/many correspondence.
-type QuestionPlan =
+/// When movement is required (wh or aux) we substitute to negative indicies
+type Substitution =
     {
         SourceIndices : int[]
         ReplacementString : string
@@ -69,7 +72,7 @@ let whDependencySubstitution ( getIndex ) ( isNominative : bool ) ( sa : Sentenc
         // Map a wh
         let whString = sa |> wh index isNominative
         // Wrap in a substitution
-        QuestionPlan.Create(dependentIndices,whString) |> Some
+        Substitution.Create(dependentIndices,whString) |> Some
     | None -> None
 
 /// Returns a wh/subject substitution, i.e. to make a SUBJECT position prompt question 
@@ -91,18 +94,18 @@ let whAdjunctSubstitutions ( sa : SentenceAnnotation ) =
         |> Array.map( fun (adjuct,indexTuples) -> 
             let indices = indexTuples |> Array.map snd
             match adjuct with
-            | "ARGM-CAU" -> QuestionPlan.Create( indices, "why") |> Some
-            | "ARGM-DIR" -> QuestionPlan.Create( indices, "where") |> Some
-            | "ARGM-LOC" -> QuestionPlan.Create( indices, "where") |> Some
-            | "ARGM-MNR" -> QuestionPlan.Create( indices, "how") |> Some
-            | "ARGM-TMP" -> QuestionPlan.Create( indices, "when") |> Some
+            | "ARGM-CAU" -> Substitution.Create( indices, "why") |> Some
+            | "ARGM-DIR" -> Substitution.Create( indices, "where") |> Some
+            | "ARGM-LOC" -> Substitution.Create( indices, "where") |> Some
+            | "ARGM-MNR" -> Substitution.Create( indices, "how") |> Some
+            | "ARGM-TMP" -> Substitution.Create( indices, "when") |> Some
             | _ -> None
         )
     ) |> Array.toList
 
 /// Make prompt plans for substitutions for everything we can, e.g. subjects and predicates
 /// TODO: add more targets?
-let getQuestionPlans ( sa : SentenceAnnotation ) = 
+let getSubstitutions ( sa : SentenceAnnotation ) = 
     (sa |> whSubjectSubstitution)
     ::
     (sa |> whObjectSubstitution)
@@ -110,7 +113,23 @@ let getQuestionPlans ( sa : SentenceAnnotation ) =
     (sa |> whAdjunctSubstitutions)
     |> List.choose id
 
-let prompt( sa : SentenceAnnotation ) ( sub : QuestionPlan) =
+/// TODO: UNFINISHED, WAITING TO SEE IF THIS IS CONSIDERED A REQUIRED FEATURE
+/// FOLLOW UP WOULD BE QUESTIONS.FS IN FREEFORMMAPGENERATOR, WOULD NEED LEMMINFLECT CALLS
+/// Aux movement/insertion is necessary for dobj type questions with wh movement
+/// Example: John ate chicken -> John ate what ; this requires no aux and has no movement
+/// Example: John ate chicken -> What did John eat ; this has wh movement and requires a dummy do
+let auxSubstitution ( sa : SentenceAnnotation ) =
+    let beIndex = sa |> getBeRootIndex
+    let auxIndex = sa |> getInvertAuxIndex
+    match auxIndex,beIndex with
+    | Some(aux),_ -> () //move the aux, be stays in place
+    | None, Some(be) -> () //move the be
+    | None, None -> () //insert a do
+    //aux
+    //be
+    //else do
+ 
+let prompt( sa : SentenceAnnotation ) ( sub : Substitution) =
     //Set to look up indices of substituted words
     let subIndiceSet = Set sub.SourceIndices
     
@@ -135,7 +154,7 @@ let prompt( sa : SentenceAnnotation ) ( sub : QuestionPlan) =
     
 let mutable hintIndex = 0
 // Once we add concept map info, we can generate less generic hints by edge type, see /z/aolney/research_projects/guru/code/initial_prototype_system/Databases/questionTemplates.txt
-let hint( sa : SentenceAnnotation ) (sub : QuestionPlan) =
+let hint( sa : SentenceAnnotation ) (sub : Substitution) =
     let hintTemplates = 
         [
             "And what do we know about #"
@@ -155,9 +174,36 @@ let hint( sa : SentenceAnnotation ) (sub : QuestionPlan) =
 /// Not all generators need to use the same plans, but plans can sometimes be reused 
 /// across generators.
 let GetQuestions ( sa : SentenceAnnotation ) =
-    let plans = sa |> getQuestionPlans
-    //
+    let plans = sa |> getSubstitutions
     (plans |> List.map (prompt sa))
     @
     (plans  |> List.map (hint sa))
+    |> List.toArray
     
+
+// let HintQuestionFromPredicates ( parse : LthWrapper.ParseResult ) =
+//     let hintQuestionList = new System.Collections.Generic.List<QARecord>()
+
+//     for predicate in parse.Predicates do
+//         if IsVerb( predicate.node.pos ) then //no nominal predicates
+//             for argument in predicate.args do
+//                 if  argument.argLabel = LthWrapper.Arg.A0 || 
+//                     argument.argLabel = LthWrapper.Arg.A1 ||
+//                     argument.argLabel = LthWrapper.Arg.A2  then
+
+//                     //the phrase we inject into the template
+//                     let dependentPhrase = GetDependentPhrase( argument.arg ).ToLower()
+                
+//                     //fill out a random template
+//                     let hint = FillHintTemplate( dependentPhrase ) 
+
+//                     //create a dummy record with the answer/fact as all fields
+//                     let qaRecord = new QARecord( parse.Nodes, parse.Nodes )
+
+//                     //update the record with the hint question
+//                     qaRecord.QuestionString <- hint 
+
+//                     hintQuestionList.Add( qaRecord )
+
+//     //return
+//     hintQuestionList
