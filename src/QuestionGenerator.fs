@@ -128,7 +128,19 @@ let auxSubstitution ( sa : SentenceAnnotation ) =
     //aux
     //be
     //else do
+
+/// Extract token substring for sentence annotation using given indices
+let indicesToSubstring ( sa : SentenceAnnotation ) ( indices : int[]) =
+    indices |> Array.map( fun i -> sa.dep.words.[i]) |> String.concat " "
+
+let trimPunctuation ( text : string ) = 
+    text.Trim([|'.';' '|])
+
+/// Make first letter uppercase and change punctuation to ?
+let questionCase ( text : string ) =
+    (text |> String.mapi( fun i c -> match i with | 0 -> (Char.ToUpper(c)) | _ -> c) |> trimPunctuation) + "?"
  
+/// Genearte a prompt question
 let prompt( sa : SentenceAnnotation ) ( sub : Substitution) =
     //Set to look up indices of substituted words
     let subIndiceSet = Set sub.SourceIndices
@@ -150,10 +162,11 @@ let prompt( sa : SentenceAnnotation ) ( sub : Substitution) =
                 w |> Some
             ) 
         |> String.concat " "
-    Question.Create( QuestionType.Prompt, text, sub.ReplacementString)
+    Question.Create( QuestionType.Prompt, text |> questionCase, sub.SourceIndices |> indicesToSubstring sa)
     
 let mutable hintIndex = 0
 // Once we add concept map info, we can generate less generic hints by edge type, see /z/aolney/research_projects/guru/code/initial_prototype_system/Databases/questionTemplates.txt
+/// Generate a hint
 let hint( sa : SentenceAnnotation ) (sub : Substitution) =
     let hintTemplates = 
         [
@@ -168,7 +181,10 @@ let hint( sa : SentenceAnnotation ) (sub : Substitution) =
     let template = hintTemplates.[ hintIndex % (hintTemplates.Length - 1) ]
     let filler = sub.SourceIndices |> Array.map( fun i -> sa.dep.words.[i]) |> String.concat " "
     let text = template.Replace("#", filler)
-    Question.Create( QuestionType.Hint, text, sub.ReplacementString)
+    let subIndiceSet = Set sub.SourceIndices
+    //NOTE: could possibly use entire sentence as the completion, but that would violate the multi-component property of hints
+    //Could make completion a complete proposition?
+    Question.Create( QuestionType.Hint, text |> questionCase, [| 0 .. sa.dep.words.Length - 1 |] |> Array.filter(subIndiceSet.Contains >> not) |> indicesToSubstring sa |> trimPunctuation)
 
 /// Get questions from a sentence annotation. Uses all generators. 
 /// Not all generators need to use the same plans, but plans can sometimes be reused 

@@ -119,7 +119,8 @@ type DocumentAnnotation =
     {
         sentences : SentenceAnnotation[]
         coreference : Coreference
-    }
+    } with
+    static member CreateEmpty() = { sentences = [||] ; coreference = !!null }
 
 type Entailment =
     {
@@ -129,7 +130,9 @@ type Entailment =
         label_probs : float[]
         p2h_attention : float[][]
         premise_tokens : string[]
-    }
+    } with
+    static member CreateEmpty() = { h2p_attention  = [||]; hypothesis_tokens = [||]; label_logits  = [||]; label_probs  = [||]; p2h_attention = [||]; premise_tokens = [||]; }
+
 
 ///////////////////////////////////////////////////////////////////////
 /// REQUESTS
@@ -372,21 +375,23 @@ let collapseDependencies (sa : SentenceAnnotation) =
     //
     dependenciesCC
 
-/// Get a list of dependent indices from start index
+/// Get a list of dependent indices from start index (0-base index)
 let getDependentIndices ( start : int ) ( sa : SentenceAnnotation ) =
     let dependents = ResizeArray<int>()
-    for h in sa.dep.predicted_heads do
-        let mutable hbar = h
-        while hbar <> start && hbar <> 0 do
-            hbar <- sa.dep.predicted_heads.[hbar]
-        if hbar = start then dependents.Add(h)
-    //
+    for i = 0 to sa.dep.predicted_heads.Length - 1 do
+        //predicted_heads are 1-base indexed
+        let mutable hbar = sa.dep.predicted_heads.[i] - 1
+        //walk predicted heads until we either match the start index or bottom out in ROOT (-1)
+        while hbar <> start && hbar <> -1 do
+            hbar <- sa.dep.predicted_heads.[hbar] - 1
+        //add where we stopped as a dependency only if it is a dependent of start or start itself
+        if hbar = start || i = start then dependents.Add(i)
     dependents.ToArray()
 
 /// Convert SRL BIO tags to a map with key as tag without BIO prefix and value a list of tag/index tuples for that tag
 let srlArgToIndexMap (srlTags : string[]) =
     srlTags 
-    |> Array.mapi( fun i t -> t.Substring( t.IndexOf("-") ),i)
+    |> Array.mapi( fun i t -> t.Substring( t.IndexOf("-") + 1 ),i)
     |> Array.groupBy fst
     |> Map.ofArray
 
@@ -424,6 +429,8 @@ let getPredicateIndex ( sa : SentenceAnnotation ) =
     if sa.dep.pos.[rootIndex].StartsWith("VB") then
         //the first child of the verb that is a dobj (starting from the beginning shouldn't matter)
         sa.dep.predicted_heads 
-        |> Array.tryFindIndex( fun h -> h = rootIndex && sa.dep.predicted_dependencies.[h] = "dobj" )
+        //make zero indexed
+        |> Array.mapi( fun i h -> i,h - 1)
+        |> Array.tryFindIndex( fun (i,h) -> h = rootIndex && sa.dep.predicted_dependencies.[i] = "dobj" )
     else
         rootIndex |> Some //TODO: SPAN WILL DOMINATE S

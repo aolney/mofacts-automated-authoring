@@ -45,6 +45,7 @@ type Service =
   | DefinitionalFeedback
   | InitializeDefinitionalFeedback
   | InitializeSpellingCorrector
+  | TutorialDialogue
 
 type Model = 
   {
@@ -134,6 +135,7 @@ let update msg (model:Model) =
       | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
       | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
+      | TutorialDialogue -> makeCmd TutorialDialogue.GetDialogue (model.InputText |> ofJson<TutorialDialogue.DialogueState> ) makeServiceResult
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -211,6 +213,7 @@ let view model dispatch =
                 select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ] [ 
                   option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
                   option [ Value Service.AllCloze ] [ str "Get All Cloze" ]
+                  option [ Value Service.TutorialDialogue ] [ str "Tutorial Dialogue" ]
                   option [ Value Service.DefinitionalFeedback ] [ str "Definitional Feedback" ]
                   option [ Value Service.InitializeDefinitionalFeedback ] [ str "Initialize Definitional Feedback" ]
                   option [ Value Service.InitializeSpellingCorrector ] [ str "Initialize Spelling Corrector" ]
