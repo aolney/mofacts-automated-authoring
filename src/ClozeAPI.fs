@@ -72,6 +72,7 @@ let StringToTag (keyValue : string) =
     match s.[0] with
     | "weightGroup" -> s.[1] |> int |> WeightGroup
     | "orderGroup" -> s.[1] |> int |> OrderGroup
+    | "OrderGroup" -> s.[1] |> int |> OrderGroup 
     | "chunk" ->  s.[1] |> int |> OrderGroup //transitional
     | "default" ->  s.[1] |> Deprecated //transitional
     | _ -> "Error:" + keyValue |> Trace

@@ -308,6 +308,6 @@ let GetDialogue (state:DialogueState) =
 
 // Example test JSON for App InputText
 // {
-//   "ClozeItem": "John ate a _____.",
+//   "ClozeItem": "John ate a _____ because he was hungry.",
 //   "ClozeAnswer": "hamburger"
 // }

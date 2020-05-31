@@ -290,7 +290,7 @@ let GetNLP( chunksJsonOption : string option ) ( inputText : string )=
                 |> resultsToType
                 |> Array.mapi ( fun i chunk -> 
                     chunk |> Array.map( fun sen -> 
-                        [| "OrderGroup:" + i.ToString() |] ,sen  ) 
+                        [| "orderGroup:" + i.ToString() |] ,sen  ) //053120 camelcased OrderGroup
                 ) 
                 |> Array.collect id //flatten to single list of sentences
                 |> Array.unzip // unzip to parallel lists of tags and sentences
