@@ -72,7 +72,7 @@ let StringToTag (keyValue : string) =
     match s.[0] with
     | "weightGroup" -> s.[1] |> int |> WeightGroup
     | "orderGroup" -> s.[1] |> int |> OrderGroup
-    | "OrderGroup" -> s.[1] |> int |> OrderGroup 
+    | "OrderGroup" -> s.[1] |> int |> OrderGroup
     | "chunk" ->  s.[1] |> int |> OrderGroup //transitional
     | "default" ->  s.[1] |> Deprecated //transitional
     | _ -> "Error:" + keyValue |> Trace
@@ -216,6 +216,7 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
         trace.Add("CRITICAL: invalid clozable parameters for " + (sen |> toJson  ) |> Trace )
         { words=Array.empty; start=0; stop=0; trace= trace|> Seq.toList ; prob = 1.0 ; tags = sen.tags |> Array.map StringToTag |> Array.toList } 
     else
+        //TODO: take another look at this logic now that we've created various utility functions for NLG that process AllenNLP dependencies
         //this is a pseudohead of the span. we can't use real heads because stanford dependencies aren't universal dependencies
         //therefore we must allow for functional/exocentric heads but find the pseudohead approximating universal dependencies 
         let h =
@@ -246,6 +247,8 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                     | _,_ -> trace.Add( "CRITICAL: clozable without nominal or arg, defaulting to given span" |> Trace); stopInit
                 else
                     stanfordHead
+
+        //NOTE: the logic here focuses on premodifiers + nominal not post modifying phrases
         //take preceeding modifiers of the nominal pseudohead that are nounish or JJ 
         let indices = [| startInit .. h |] |> Array.rev |> Array.takeWhile( fun i -> sen.dep.pos.[i].StartsWith("N") || sen.dep.pos.[i] =  "JJ" ) |> Array.rev
         let start, stop, words = 
@@ -328,6 +331,8 @@ let GetAllCloze (nlpJsonOption: string option) ( chunksJsonOption : string optio
             return Error(e)
     }
 
+//TODO: since we are not allowing truly long fill ins (~4 words long) prefering longer once here 
+//may be causing us to throw items away. To prevent that, the length restriction need to be here as well
 /// Remove overlapping cloze, preferring larger spans
 /// a starts before b, but they overlap
 /// b starts before a, but they overlap
@@ -355,6 +360,7 @@ let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
     itemWords |> String.concat " ", cl.words |> String.concat " "
 
 // TODO: CLEANING OUT PARENTHESES IN CLEANTEXT PROBABLY LIMITS OR UNDOES THIS
+// TODO: USE SIMILAR APPROACH FOR COREFERENCE CHAINS?
 /// Finds acronyms in parentheses and tries to map to nearby words. Makes strong assumptions / not highly general
 let GetAcronymMap input =
     //assumes all acronyms are caps only and bounded by parentheses. NOTE: used named group at first but gave up when it didn't work
@@ -496,12 +502,14 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
             //     |> Array.collect( fun (sa,cl) -> cl |> Array.ofList )
             //     |> Array.windowed 30 //TODO arbitrary size here; need theoretical justification
 
-            //Package for external API
+            //Create acronym map to expand "correct" answers for items
             let input = 
                 match chunksJsonOption with
                 | Some(chunksJson) -> chunksJson |> ofJson<string[]>
                 | None -> [| inputText |]
             let acronymMap = input |> String.concat " " |> GetAcronymMap |> ofJson<Map<string,string>> 
+            
+            //Package for external API
             let sentences = ResizeArray<SentenceAPI>()
             let clozes = ResizeArray<ClozableAPI>()
 

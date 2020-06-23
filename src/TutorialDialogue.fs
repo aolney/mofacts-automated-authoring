@@ -37,105 +37,105 @@ let dialogueBags =
             "Let's continue.";
         ])
         (PositiveFeedback, [
-            "yes.";
-            "good.";
-            "yes!";
-            "yay!";
-            "wow!";
-            "right.";
-            "cool.";
-            "okay.";
-            "good!";
-            "yeah!";
-            "great!";
-            "right!";
-            "sweet!";
-            "super!";
-            "bingo!";
-            "perfect!";
-            "ok good.";
-            "got it.";
-            "correct.";
-            "awesome!";
-            "exactly!";
-            "ok, good.";
-            "good job!";
-            "very good!";
-            "excellent.";
-            "that's it.";
-            "good call.";
-            "okay good.";
-            "yep, good.";
-            "that's it!";
-            "ok, super!";
-            "yes siree.";
-            "absolutely.";
-            "there we go.";
-            "that's good.";
-            "super duper!";
-            "that's right.";
-            "you're right.";
-            "yeah exactly.";
-            "there you go!";
-            "yeah, awesome!";
-            "exactly, yeah.";
-            "good, awesome.";
-            "perfect. good.";
-            "ok, very good.";
-            "alright, cool!";
-            "that's perfect.";
-            "that's awesome!";
-            "alright, sweet.";
-            "good! good job!";
-            "that's correct.";
-            "you're correct.";
-            "right, exactly.";
-            "yep, excellent.";
-            "that's terrific.";
-            "good, very good.";
-            "good, that's it.";
-            "that was perfect.";
-            "absolutely right.";
-            "good, you got it.";
-            "that is fantastic.";
-            "yes, that's right.";
-            "yeah, you're right.";
-            "there you go, you got it."
+            "Yes.";
+            "Good.";
+            "Yes!";
+            "Yay!";
+            "Wow!";
+            "Right.";
+            "Cool.";
+            "Okay.";
+            "Good!";
+            "Yeah!";
+            "Great!";
+            "Right!";
+            "Sweet!";
+            "Super!";
+            "Bingo!";
+            "Perfect!";
+            "Ok good.";
+            "Got it.";
+            "Correct.";
+            "Awesome!";
+            "Exactly!";
+            "Ok, good.";
+            "Good job!";
+            "Very good!";
+            "Excellent.";
+            "That's it.";
+            "Good call.";
+            "Okay good.";
+            "Yep, good.";
+            "That's it!";
+            "Ok, super!";
+            "Yes siree.";
+            "Absolutely.";
+            "There we go.";
+            "That's good.";
+            "Super duper!";
+            "That's right.";
+            "You're right.";
+            "Yeah exactly.";
+            "There you go!";
+            "Yeah, awesome!";
+            "Exactly, yeah.";
+            "Good, awesome.";
+            "Perfect. good.";
+            "Ok, very good.";
+            "Alright, cool!";
+            "That's perfect.";
+            "That's awesome!";
+            "Alright, sweet.";
+            "Good! good job!";
+            "That's correct.";
+            "You're correct.";
+            "Right, exactly.";
+            "Yep, excellent.";
+            "That's terrific.";
+            "Good, very good.";
+            "Good, that's it.";
+            "That was perfect.";
+            "Absolutely right.";
+            "Good, you got it.";
+            "That is fantastic.";
+            "Yes, that's right.";
+            "Yeah, you're right.";
+            "There you go, you got it."
         ])
         (NeutralPositiveFeedback, [
-            "close.";
-            "sort of.";
-            "that's close.";
-            "almost.";
-            "kind of."
+            "Close.";
+            "Sort of.";
+            "That's close.";
+            "Almost.";
+            "Kind of."
         ])
         (NeutralFeedback, [
-            "oh. hmm.";
-            "um.";
-            "hmm.";
-            "huh.";
-            "umm.";
-            "well. um";
+            "Oh. hmm.";
+            "Um.";
+            "Hmm.";
+            "Huh.";
+            "Umm.";
+            "Well. um";
         ])
         (NeutralNegativeFeedback, [
-            "not quite.";
-            "not exactly.";
-            "not really.";
+            "Not quite.";
+            "Not exactly.";
+            "Not really.";
         ])
         (NegativeFeedback, [
-            "no.";
-            "nope.";
-            "oh, no.";
-            "uh, no.";
-            "well, no.";
-            "oh, no.";
-            "not good.";
-            "well, no.";
-            "um, nope.";
-            "hmm, nope.";
-            "actually no.";
-            "that's not it.";
-            "no, that's not it.";
+            "No.";
+            "Nope.";
+            "Oh, no.";
+            "Uh, no.";
+            "Well, no.";
+            "Oh, no.";
+            "Not good.";
+            "Well, no.";
+            "Um, nope.";
+            "Hmm, nope.";
+            "Actually no.";
+            "That's not it.";
+            "No, that's not it.";
         ])
     ] |> Map.ofList
 let random = System.Random()
@@ -247,12 +247,17 @@ let GetDialogue (state:DialogueState) =
                     //feedback strength determined by amount of uncertainty (3 levels) NOTE: these are arbitrary thresholds
                     let strength = if te.label_probs.[2] > 0.66 then 1 elif te.label_probs.[2] > 0.33 then 2 else 3
                     let feedback =
-                        match polarity,strength with
-                        | 1,2 -> DialogueMove.GetRandom(  NeutralPositiveFeedback )
-                        | 1,3 -> DialogueMove.GetRandom(  PositiveFeedback )
-                        | -1,2 -> DialogueMove.GetRandom(  NeutralNegativeFeedback )
-                        | -1,3 -> DialogueMove.GetRandom(  NegativeFeedback )
-                        | _,_ -> DialogueMove.GetRandom(  NeutralFeedback )
+                        //Neutral on empty answers
+                        if sa.Trim() = "" then
+                            DialogueMove.GetRandom(  NeutralFeedback )
+                        //Use TE on all other answers
+                        else 
+                            match polarity,strength with
+                            | 1,2 -> DialogueMove.GetRandom(  NeutralPositiveFeedback )
+                            | 1,3 -> DialogueMove.GetRandom(  PositiveFeedback )
+                            | -1,2 -> DialogueMove.GetRandom(  NeutralNegativeFeedback )
+                            | -1,3 -> DialogueMove.GetRandom(  NegativeFeedback )
+                            | _,_ -> DialogueMove.GetRandom(  NeutralFeedback )
                     //to display feedback
                     display.Add( feedback.Text )
                     //return structured feedback
