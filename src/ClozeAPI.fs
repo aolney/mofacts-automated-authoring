@@ -115,12 +115,18 @@ type InternalAPI =
 ///Based on the Heart Study
 let EstimateDesiredSentences (sentences:string[] ) =
     let wordCount = sentences |> Seq.sumBy( fun sentence -> sentence.Split(' ').Length ) |> float
-    let desiredSentences = (wordCount / 1000.0) * 25.0 |> int //
+    //50% compression
+    // let desiredSentences = (wordCount / 1000.0) * 25.0 |> int 
+    //33% compression?
+    let desiredSentences = (wordCount / 1000.0) * 12.0 |> int 
     desiredSentences
 
 ///Based on the Heart Study
-let EstimateDesiredItems desiredSentences =
-    let desiredItems = desiredSentences * 2
+let EstimateDesiredItems (desiredSentences : int) =
+    //50% compression
+    //let desiredItems = desiredSentences * 2
+    //33% compression?
+    let desiredItems = (desiredSentences |> float) * 1.3 |> int
     desiredItems
 
 /// Get weight of all chains in a sentence (add the lengths together)
