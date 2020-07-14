@@ -256,6 +256,9 @@ let CleanText input =
     |> RegexReplace "\(see[^\)]+\)" ""
     |> RegexReplace "\(note[^\)]+\)" ""
     |> RegexReplace "\([^\)]+\)" "" //This one is a bit strong: we remove ALL parenthetical material (creates a mess with cloze)
+    //These two added by request; similarly are very strong like the above
+    |> RegexReplace "\[[^\]]+\]" "" //This one is a bit strong: we remove ALL parenthetical material (creates a mess with cloze)
+    |> RegexReplace "\{[^\}]+\}" "" //This one is a bit strong: we remove ALL parenthetical material (creates a mess with cloze)
     |> RegexReplace "\s+" " "
     |> RegexReplace " \.$" "." //replacements leave spaces before final period
     |> transliteration.transliterate
