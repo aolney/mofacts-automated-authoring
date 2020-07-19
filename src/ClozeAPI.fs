@@ -129,6 +129,14 @@ let EstimateDesiredItems (desiredSentences : int) =
     let desiredItems = (desiredSentences |> float) * 1.3 |> int
     desiredItems
 
+///Estimate desired sentences using arbitrary percentage
+let EstimateDesiredSentencesFromPercentage (nlpJson : string) ( percentage : float ) =
+    //Get a DocumentAnnotation if one wasn't passed in
+    let da = nlpJson |> ofJson<DocumentAnnotation> 
+    let desiredSentences = (da.sentences.Length |> float) * percentage
+    //
+    desiredSentences |> int
+    
 /// Get weight of all chains in a sentence (add the lengths together)
 let GetTotalWeight ( coref : Coreference ) sen =
     // ** FALL 2019 VERSION **
@@ -337,6 +345,33 @@ let GetAllCloze (nlpJsonOption: string option) ( chunksJsonOption : string optio
             return Error(e)
     }
 
+let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( chunksJsonOption : string option) ( inputText : string )=
+    promise {
+        //Get a DocumentAnnotation if one wasn't passed in
+        let! nlpResult = 
+            match nlpJsonOption with
+            | Some(nlpJson) -> nlpJson |> ofJson<DocumentAnnotation> |> Promisify 
+            | None -> GetNLP chunksJsonOption inputText 
+
+        match nlpResult with
+        //sentence,cloze,sentenceWeight,clozeProbability
+        | Ok(da) ->
+            let clozables = da |> GetClozable |> Array.map( fun ra -> ra.ToArray() )
+            // return Ok( {sentences = da.sentences; coreference = da.coreference; clozables = clozables} )
+            let output = 
+                da.sentences
+                |> Array.mapi( fun i sa ->
+                    let totalWeight = sa |>  GetTotalWeight da.coreference
+                    clozables.[i]
+                    |> Array.map( fun cl -> {|Sentence=sa.sen; Cloze=cl.words |> String.concat " "; SentenceWeight=totalWeight; ClozeProbability=cl.prob |}
+                    )
+                )
+            
+            return Ok( output )
+        | Error(e) -> 
+            return Error(e)
+    }
+    
 //TODO: since we are not allowing truly long fill ins (~4 words long) prefering longer once here 
 //may be causing us to throw items away. To prevent that, the length restriction need to be here as well
 /// Remove overlapping cloze, preferring larger spans
