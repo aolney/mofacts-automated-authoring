@@ -172,7 +172,9 @@ type DialogueState =
         Display : string option
         ///Is the dialogue finished
         Finished : bool option
-    }
+    } with
+    static member Initialize( clozeItem )( clozeAnswer) = { ClozeItem = clozeItem; ClozeAnswer = clozeAnswer; Questions = None; LastQuestion = None; LastStudentAnswer = None; CurrentFeedback = None; CurrentElaboration = None; CurrentQuestion = None; Display = None; Finished = None }
+    static member InitializeTest() = DialogueState.Initialize "The supraspinatus is located in the depression above the spine of the scapula on its _______ _______." "posterior surface"
 
 let GetDialogue (state:DialogueState) =
     promise{
@@ -186,8 +188,8 @@ let GetDialogue (state:DialogueState) =
         // let resultsToType (resultsArr : Result<'t,'e>[] )  = resultsArr |> Array.choose( fun r -> match r with | Ok(r) -> Some(r) | Error(_) -> None ) 
         
         //The cloze in complete sentence form
-        let text = System.Text.RegularExpressions.Regex.Replace(state.ClozeItem, "_+", state.ClozeAnswer)
-
+        let text = System.Text.RegularExpressions.Regex.Replace(state.ClozeItem, "(_ _|_)+", state.ClozeAnswer) //multi word cloze requires _ _ first
+ 
         //To make promises cleaner, pull them all here; can't use pattern matching without nested promises
         //Prepare for question generation by getting NLP; doing a no-op if not needed (TODO make cleaner?)
         let! daResult = 
@@ -221,7 +223,7 @@ let GetDialogue (state:DialogueState) =
             let questions = 
                 match state.Questions, daOption with
                 | Some(q), _ -> q
-                | None, Some(da) -> da.sentences |> Array.head |> GetQuestions
+                | None, Some(da) -> da.sentences |> Array.head |> GetQuotedQuestions state.ClozeAnswer
                 | _,_ -> Array.empty //this is logically impossible
 
             //Select hint, prompt, or elaboration depending on last question

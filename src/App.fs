@@ -153,7 +153,13 @@ let update msg (model:Model) =
     // ( {model with InputText=""; JsonInput=None; JsonResult=json; Status=code.ToString()}, [])
     ( {model with JsonResult=json; Status=code.ToString()}, [])
   | ServiceChange(service) ->
-    ( {model with Service=service; Status=""}, [])
+    //Some services require json in the Input box
+    let inputText = 
+      match service with
+      // | TutorialDialogue -> TutorialDialogue.DialogueState.Initialize "" "" |> toJson
+      | TutorialDialogue -> TutorialDialogue.DialogueState.InitializeTest() |> toJson
+      | _ -> ""
+    ( {model with Service=service; Status=""; InputText = inputText}, [])
   | DownloadJson ->
       let a = document.createElement("a") :?> Browser.Types.HTMLLinkElement
       //need blobs for larger sizes

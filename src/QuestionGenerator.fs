@@ -196,6 +196,13 @@ let GetQuestions ( sa : SentenceAnnotation ) =
     (plans  |> List.map (hint sa))
     |> List.toArray
     
+// Get questions but quote around the clozed text
+let GetQuotedQuestions ( clozeAnswer : string ) ( sa : SentenceAnnotation ) =
+    sa
+    |> GetQuestions
+    |> Array.map( fun q -> 
+        { q with Text = System.Text.RegularExpressions.Regex.Replace(q.Text,"\\b" + clozeAnswer + "\\b", "\"" + clozeAnswer + "\"") }
+    )
 
 // let HintQuestionFromPredicates ( parse : LthWrapper.ParseResult ) =
 //     let hintQuestionList = new System.Collections.Generic.List<QARecord>()
