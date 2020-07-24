@@ -437,3 +437,29 @@ let getPredicateIndex ( sa : SentenceAnnotation ) =
         |> Array.tryFindIndex( fun (i,h) -> h = rootIndex && sa.dep.predicted_dependencies.[i] = "dobj" )
     else
         rootIndex |> Some //TODO: SPAN WILL DOMINATE S
+
+/// Get referent label that best represents coreferents in chain
+let resolveReferents ( da : DocumentAnnotation ) =
+    let clusterSentenceMap =
+        da.sentences
+        |> Array.mapi( fun i s -> 
+            s.cor.clusters
+            |> Array.map( fun c -> c,i )
+            )
+        |> Array.collect id
+        |> Array.distinct
+        |> Map.ofArray
+
+    let sentenceWords =
+        da.sentences
+        |> Array.map( fun sa -> 
+            //for each cluster, get the associated sentences and spans; determine the span that best represents the coreferents in the chain using POS; replace tokens with that
+            sa.cor.clusters
+            |> Array.mapi( fun i clusterId -> 
+                da.coreference.clusters.[clusterId] 
+                |> Array.tryFind( fun span -> 
+                    //exclude PRP
+                    sa.cor.spans
+                )
+                )
+        )
