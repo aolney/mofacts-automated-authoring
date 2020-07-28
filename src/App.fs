@@ -49,6 +49,7 @@ type Service =
   | InitializeDefinitionalFeedback
   | InitializeSpellingCorrector
   | TutorialDialogue
+  | Test
 
 type Model = 
   {
@@ -139,6 +140,7 @@ let update msg (model:Model) =
       | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
       | TutorialDialogue -> makeCmd TutorialDialogue.GetDialogue (model.InputText |> ofJson<TutorialDialogue.DialogueState> ) makeServiceResult
+      | Test -> makeCmd (AllenNLP.resolveReferents >> AllenNLP.Promisify) (model.JsonInput.Value |> ofJson<AllenNLP.DocumentAnnotation> ) makeServiceResult
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
@@ -239,6 +241,7 @@ let view model dispatch =
                   option [ Value Service.CleanText  ] [ str "Clean Text" ] 
                   option [ Value Service.Acronym  ] [ str "Acronym" ] 
                   option [ Value Service.Reverse  ] [ str "Reverse" ] 
+                  option [ Value Service.Test  ] [ str "Test" ] 
                 ] 
               ]
             ]
@@ -249,7 +252,9 @@ let view model dispatch =
                         model.Service <> Service.AllCloze && 
                         model.Service <> Service.DefinitionalFeedback &&
                         model.Service <> Service.InitializeDefinitionalFeedback &&
-                        model.Service <> Service.InitializeSpellingCorrector)] [
+                        model.Service <> Service.InitializeSpellingCorrector &&
+                        model.Service <> Service.Test
+                        )] [
             Label.label [ ] [ str "Optional JSON (e.g. parse)" ]
             Fulma.File.file [ 
                 Fulma.File.HasName 

@@ -243,6 +243,7 @@ let GetTextualEntailment( premise: string ) (hypothesis :string): JS.Promise<Res
         return! Fetch.tryPost( endpoints.TextualEntailment, { hypothesis = hypothesis; premise=premise }, caseStrategy = SnakeCase)       
     }
 
+
 let RegexReplace (pattern : string) (replacement:string) (input:string) =
     System.Text.RegularExpressions.Regex.Replace( input, pattern, replacement )
     
@@ -440,26 +441,104 @@ let getPredicateIndex ( sa : SentenceAnnotation ) =
 
 /// Get referent label that best represents coreferents in chain
 let resolveReferents ( da : DocumentAnnotation ) =
+    //Map from cluster id to all sentences with that cluster
     let clusterSentenceMap =
         da.sentences
         |> Array.mapi( fun i s -> 
             s.cor.clusters
-            |> Array.map( fun c -> c,i )
+            |> Array.mapi( fun j c -> c,i,j )
             )
         |> Array.collect id
-        |> Array.distinct
+        // |> Array.distinct
+        |> Array.groupBy( fun (c,_,_) -> c )
         |> Map.ofArray
 
-    let sentenceWords =
+    let demonstrativeRegex = System.Text.RegularExpressions.Regex( "(this|that|these|those)", System.Text.RegularExpressions.RegexOptions.IgnoreCase )
+    //A span is pronominal if it starts with a PTB pronoun or a manual demonstrative pronoun
+    let spanIsPronominal (sa : SentenceAnnotation ) ( span : int[] ) =
+        sa.dep.pos.[  span.[0] ].StartsWith("PRP") ||
+        demonstrativeRegex.IsMatch( sa.dep.words.[  span.[0] ] )
+
+    //We could try to "splice" a new sentence annotation using the original and resolved referent, but 
+    //it seems safer to stick to the word level and then reparse to get annotations as needed unless performance becomes a concern
+    let resolvedSentences =
         da.sentences
         |> Array.map( fun sa -> 
-            //for each cluster, get the associated sentences and spans; determine the span that best represents the coreferents in the chain using POS; replace tokens with that
-            sa.cor.clusters
-            |> Array.mapi( fun i clusterId -> 
-                da.coreference.clusters.[clusterId] 
-                |> Array.tryFind( fun span -> 
-                    //exclude PRP
-                    sa.cor.spans
+            //for each cluster, 
+            //get the associated sentences and spans; 
+            //determine the span that best represents the coreferents in the chain using POS; replace tokens with that
+            let clusterReferents =
+                sa.cor.clusters
+                |> Array.map( fun clusterId -> 
+                    //Nominal referent phrases for this cluster; may be empty
+                    let nominalReferents = 
+                        clusterSentenceMap.[clusterId] 
+                        |> Array.map( fun (_,sentenceId,spanId)-> (sentenceId,spanId) )
+                        |> Array.sortBy fst
+                        |> Array.choose( fun (sentenceId,spanId) ->
+                            //span is [start; stop]
+                            let span =  da.sentences.[sentenceId].cor.spans.[spanId]
+                            //check if any one element in the span is a noun
+                            // let hasNoun = da.sentences.[sentenceId].dep.pos.[ span.[0] .. span.[1] ] |> Array.exists( fun pos -> pos.StartsWith("NN") )
+                            //if the span contains a noun, return the associated words
+                            // if hasNoun then
+                            //     Some(da.sentences.[sentenceId].dep.words.[ span.[0] .. span.[1] ] |> String.concat " " )
+                            // else
+                            //     None
+                            // as above, but preserve the sentence id to do locality-sensitive resolution
+                            if spanIsPronominal da.sentences.[sentenceId] span then
+                                None
+                            else
+                                Some(sentenceId, da.sentences.[sentenceId].dep.words.[ span.[0] .. span.[1] ] |> String.concat " " )
+                        )
+                    //Return the earliest nominal referent for this chain as the resolved referent (this is OK for short chains, but for long chains with any error, does not work well)
+                    //nominalReferents |> Array.tryHead
+
+                    //Display all possibilities. Difficult to read for long chains
+                    //nominalReferents |> String.concat "+" |> Some
+                    //Display all possibilities, counting duplicates. Helps but still hard to read
+                    // nominalReferents |> Array.countBy id |> sprintf "%A" |> Some
+
+                    // Return the most often occuring referent in the chain. Ok for short chains, but for long chains with any error does not work well.
+                    // match nominalReferents |> Array.countBy id with
+                    // | [||]-> None
+                    // | x -> x |> Array.maxBy snd |> sprintf "%A" |> Some
+
+                    // Return the closest preceeding referent (locality-sensitive resolution)
+                    match nominalReferents with
+                    | [||]-> None
+                    | x -> 
+                        match x |> Array.sortBy fst |> Array.tryFindBack( fun (i,w) -> i < sa.id ) with //Could allow equality in case best referent is already within the sentence, but this seems to introduce more errors than not
+                        | None -> None
+                        | Some(_,w) -> Some(w)
+                   
                 )
-                )
+            // Transform the original sentence by splicing in these referents -> IFF span does not contain nominal AND referent is Some
+            let indexedWords = sa.dep.words |> Array.copy 
+            for i = 0 to sa.cor.spans.Length - 1 do
+                // has noun is not enough; does not address cases like "this system"
+                // let spanHasNoun = sa.dep.pos.[  sa.cor.spans.[i].[0] ..  sa.cor.spans.[i].[1] ] |> Array.exists( fun pos -> pos.StartsWith("NN") )
+                // let spanPronominal = 
+                //     sa.dep.pos.[  sa.cor.spans.[i].[0] ].StartsWith("PRP") ||
+                //     demonstrativeRegex.IsMatch( sa.dep.words.[  sa.cor.spans.[i].[0] ] )
+
+                let originalWords = sa.dep.words.[  sa.cor.spans.[i].[0] ..  sa.cor.spans.[i].[1] ] |> String.concat " "
+                // if we have a clusterReferent for this span
+                // if clusterReferents.[i].IsSome then
+                if spanIsPronominal sa sa.cor.spans.[i] && clusterReferents.[i].IsSome then
+                    // replace the first word of span with clusterReferent (which could be multiword)
+                    // indexedWords.[ sa.cor.spans.[i].[0] ] <- clusterReferents.[i].Value
+                    //for debugging, see original + alternatives
+                    indexedWords.[ sa.cor.spans.[i].[0] ] <- "(" + originalWords + "|" + clusterReferents.[i].Value + ")"
+                    // blank out the remaining words in the span
+                    for j = sa.cor.spans.[i].[0] + 1 to sa.cor.spans.[i].[1] do //TODO check end inclusive
+                        indexedWords.[ j ] <- ""
+                // if there is no cluster referent, keep the original words
+                else
+                    ()
+
+            // Return the indexed words as a string, without blanks
+            indexedWords |> Array.filter( fun w -> w.Length > 0 ) |> String.concat " "
         )
+    //
+    resolvedSentences
