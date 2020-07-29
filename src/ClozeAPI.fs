@@ -394,14 +394,20 @@ let RemoveOverlappingClozables (clozables : Clozable[] ) =
     clozablesOut.ToArray()
 
 /// Return an item as a sentence with words blanked out, together with the corresponding words
+/// Modified to blank out ALL occurances of clozeAnswer, even if they appear multiple times
 let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
-    let itemWords = Array.copy sa.srl.words
-    for i = cl.start to cl.stop do
-        itemWords.[i] <- "__________"
-    itemWords |> String.concat " ", cl.words |> String.concat " "
+    let blank = [| for _ = cl.start to cl.stop do yield "__________" |] |> String.concat " "
+    let sentence = Array.copy sa.srl.words |> String.concat " "
+    let cloze = cl.words |> String.concat " "
+    let item = System.Text.RegularExpressions.Regex.Replace( sentence, @"\b" + cloze + @"\b", blank) |> AllenNLP.removePrePunctuationSpaces
+    item,cloze
+// let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
+//     let itemWords = Array.copy sa.srl.words
+//     for i = cl.start to cl.stop do
+//         itemWords.[i] <- "__________"
+//     itemWords |> String.concat " ", cl.words |> String.concat " "
 
 // TODO: CLEANING OUT PARENTHESES IN CLEANTEXT PROBABLY LIMITS OR UNDOES THIS
-// TODO: USE SIMILAR APPROACH FOR COREFERENCE CHAINS?
 /// Finds acronyms in parentheses and tries to map to nearby words. Makes strong assumptions / not highly general
 let GetAcronymMap input =
     //assumes all acronyms are caps only and bounded by parentheses. NOTE: used named group at first but gave up when it didn't work
