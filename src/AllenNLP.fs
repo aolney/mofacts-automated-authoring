@@ -368,6 +368,11 @@ let GetNLP( chunksJsonOption : string option ) ( inputText : string )=
 /// Post processing
 /// ///////////////////////////////////////////////////////////////////
 
+let prePunctuationSpaceRegex = System.Text.RegularExpressions.Regex(@" ([^\w\s]+)")
+let removePrePunctuationSpaces ( input : string ) =
+    prePunctuationSpaceRegex.Replace(input, "$1")
+
+
 let collapseDependencies (sa : SentenceAnnotation) = 
     let ruleTokens = 
         sa.dep.words 
