@@ -61,6 +61,16 @@ type Tag =
     | CorefClusterBackwardWeight of int
     /// The forward weight (length) of all coref chains in the item
     | CorefClusterForwardWeight of int
+    /// Variant of total weight
+    | SentenceWeight of int
+    /// Word probability of rarest word in a cloze answer
+    | ClozeProbability of float
+    /// Source sentence with coreferents resolved
+    | CorefResolution of string
+    /// Source sentence paraphrased
+    | Paraphrase of string
+    /// Transformations source sentence has undergone to make cloze item
+    | Transformations of string list
     /// Debug information
     | Trace of string
     /// Mark deprecated tags that may still be in parse
@@ -80,13 +90,17 @@ let StringToTag (keyValue : string) =
 ///A clozable we have generated
 type Clozable =
     {
+        ///The words being clozed on, i.e. the cloze fill-in
         words : string[]
+        ///Position of first cloze word in source sentence
         start : int
+        ///Position of last cloze word in source sentence
         stop : int
-        /// Collected messages reflecting our decision making; primarily for debug purposes (obj b/c some are Tag)
+        ///Collected messages reflecting our decision making; primarily for debug purposes (obj b/c some are Tag)
         trace : Tag list
+        ///Probability assigned to this clozable (single probability)
         prob : float
-        /// Tags we can use for cluster assignment
+        ///Tags we can use for cluster assignment
         tags : Tag list
     }
     //TODO switching to auto encoding/decoding b/c of the complexity of Tags and trace
@@ -219,16 +233,16 @@ let getFeatureCorefClusterForwardWeight sen ( da : DocumentAnnotation )  =
 // -- END Features for word level difficulty analysis, appended to trace ---
 
 /// Returns a Clozable for a modified NP given a sentence annotation and span of interest
-let GetModifiedNPClozable sen startInit stopInit head traceInit =
+let GetModifiedNPClozable sa startInit stopInit head traceInit =
     let trace = ResizeArray<Tag>()
     trace.AddRange(traceInit)
-    trace.Add( getFeatureDistanceFromRoot startInit stopInit sen )
+    trace.Add( getFeatureDistanceFromRoot startInit stopInit sa )
     trace.Add( getFeatureDistanceFromStart startInit)
 
     //check for insanity first. return empty if insane
-    if startInit < 0 || stopInit >= sen.srl.words.Length then //|| head < 0 || head >= sen.srl.words.Length then
-        trace.Add("CRITICAL: invalid clozable parameters for " + (sen |> toJson  ) |> Trace )
-        { words=Array.empty; start=0; stop=0; trace= trace|> Seq.toList ; prob = 1.0 ; tags = sen.tags |> Array.map StringToTag |> Array.toList } 
+    if startInit < 0 || stopInit >= sa.srl.words.Length then //|| head < 0 || head >= sen.srl.words.Length then
+        trace.Add("CRITICAL: invalid clozable parameters for " + (sa |> toJson  ) |> Trace )
+        { words=Array.empty; start=0; stop=0; trace= trace|> Seq.toList ; prob = 1.0 ; tags = sa.tags |> Array.map StringToTag |> Array.toList } 
     else
         //TODO: take another look at this logic now that we've created various utility functions for NLG that process AllenNLP dependencies
         //this is a pseudohead of the span. we can't use real heads because stanford dependencies aren't universal dependencies
@@ -240,21 +254,21 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                 let stanfordHead = 
                     [|  startInit .. stopInit |] 
                     //get the predicted heads for each index; predicted heads are 1 indexed (root is 0)
-                    |> Seq.map( fun i -> i,sen.dep.predicted_heads.[i])
+                    |> Seq.map( fun i -> i,sa.dep.predicted_heads.[i])
                     //find tuple with a predicted head outside the span (because English is projective)
                     |> Seq.find( fun (_,h) -> h < startInit + 1 || h > stopInit + 1 )
                     //return the index
                     |> fst
                 //require nominal pseudohead if stanfordHead is not nominal
-                if sen.dep.pos.[ stanfordHead ].StartsWith("NN") |> not then
+                if sa.dep.pos.[ stanfordHead ].StartsWith("NN") |> not then
                     trace.Add( "head is not nominal" |> Trace)
                     //debug
                     // if sen.id > 140 then
                     //     printfn "debug"
                     //get subj/obj dependencies, take first
-                    let argOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.predicted_dependencies.[i]) |> Seq.tryFind( fun (_,h) -> h.Contains("subj") || h.Contains("obj")) 
+                    let argOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sa.dep.predicted_dependencies.[i]) |> Seq.tryFind( fun (_,h) -> h.Contains("subj") || h.Contains("obj")) 
                     //get nominal words, take last
-                    let nnOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sen.dep.pos.[i]) |> Seq.rev |> Seq.tryFind( fun (_,h) -> h.StartsWith("NN")) 
+                    let nnOption = [|  startInit .. stopInit |] |> Seq.map( fun i -> i,sa.dep.pos.[i]) |> Seq.rev |> Seq.tryFind( fun (_,h) -> h.StartsWith("NN")) 
                     match argOption,nnOption with
                     | Some(arg),_ ->  trace.Add( "WARNING: using first syntactic arg as pseudohead" |> Trace); arg |> fst
                     | _, Some(nn) -> trace.Add( "WARNING: using last nominal as pseudohead" |> Trace); nn |> fst
@@ -264,15 +278,15 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
 
         //NOTE: the logic here focuses on premodifiers + nominal not post modifying phrases
         //take preceeding modifiers of the nominal pseudohead that are nounish or JJ 
-        let indices = [| startInit .. h |] |> Array.rev |> Array.takeWhile( fun i -> sen.dep.pos.[i].StartsWith("N") || sen.dep.pos.[i] =  "JJ" ) |> Array.rev
+        let indices = [| startInit .. h |] |> Array.rev |> Array.takeWhile( fun i -> sa.dep.pos.[i].StartsWith("N") || sa.dep.pos.[i] =  "JJ" ) |> Array.rev
         let start, stop, words = 
             if indices.Length <> 0 then
                 let start = indices.[0]
                 let stop = indices |> Array.last
-                start, stop, sen.srl.words.[ start .. stop ]
+                start, stop, sa.srl.words.[ start .. stop ]
             else
                 trace.Add("CRITICAL: stanford head yields empty span, defaulting to given span" |> Trace)
-                startInit, stopInit, sen.srl.words.[ startInit .. stopInit ]
+                startInit, stopInit, sa.srl.words.[ startInit .. stopInit ]
 
         let clozable = 
             { 
@@ -282,33 +296,39 @@ let GetModifiedNPClozable sen startInit stopInit head traceInit =
                 trace = trace |> Seq.toList //.ToArray()
                 //use the lowest freq word in the span
                 prob = words |> Array.map WordFrequency.Get |> Array.min
-                tags = sen.tags |> Array.map StringToTag |> Array.toList 
+                tags = sa.tags |> Array.map StringToTag |> Array.toList 
             }
         //
         clozable
 
-/// GetClozable items for a sentence using syntactic, srl, and coref information. TODO: filter non subj/obj/mod
-let GetClozable ( da : DocumentAnnotation ) =
+/// GetClozable items for a sentence using syntactic, srl, and coref information. 
+/// DocumentAnnotation level enhancements are inserted here for now (resolved coref and paraphrase)
+/// TODO: filter non subj/obj/mod
+let GetClozables ( da : DocumentAnnotation ) =
+    // get analogues for sentences; some, like coref, require document-level context so belong here
+    let corefresolvedSentences = da |> AllenNLP.resolveReferents
+
     da.sentences
-    |> Array.map( fun sen -> 
+    |> Array.map( fun sa -> 
         let clozable = new ResizeArray<Clozable>()
         //coref based cloze
         clozable.AddRange( 
-            sen.cor.spans 
-            |> Seq.mapi( fun i si -> GetModifiedNPClozable sen si.[0] si.[1] None [ "coref" |> Trace; getFeatureCorefClusters sen; getFeatureCorefClusterTotalWeight sen da; getFeatureCorefClusterBackwardWeight sen da; getFeatureCorefClusterForwardWeight sen da  ] )
+            sa.cor.spans 
+            |> Seq.mapi( fun i si -> 
+                GetModifiedNPClozable sa si.[0] si.[1] None [ "coref" |> Trace; getFeatureCorefClusters sa; getFeatureCorefClusterTotalWeight sa da; getFeatureCorefClusterBackwardWeight sa da; getFeatureCorefClusterForwardWeight sa da ] )
         )
         //syntactic subj/obj
         clozable.AddRange(
-            sen.dep.predicted_dependencies
+            sa.dep.predicted_dependencies
             |> Seq.mapi( fun i x -> i,x)
             |> Seq.filter( fun (i,d) -> d.Contains("obj") || d.Contains("subj") || d.Contains("root") ) //root for copula constructions
             //must be noun (catches edge cases of relative clauses) TODO: allow pronoun if resolved to referent
-            |> Seq.filter( fun (i,d) -> sen.dep.pos.[i].StartsWith("N") ) // || sen.dep.pos.[i] = "PRP" )
-            |> Seq.map( fun (i,d) -> GetModifiedNPClozable sen i i (i|>Some) [ "dep" |> Trace; d |> Trace;  d |> SyntacticRole] )
+            |> Seq.filter( fun (i,d) -> sa.dep.pos.[i].StartsWith("N") ) // || sen.dep.pos.[i] = "PRP" )
+            |> Seq.map( fun (i,d) -> GetModifiedNPClozable sa i i (i|>Some) [ "dep" |> Trace; d |> Trace;  d |> SyntacticRole] )
         )
         //srl
         clozable.AddRange(
-            sen.srl.verbs
+            sa.srl.verbs
             |> Seq.collect( fun pred ->
                 pred.tags 
                 |> Seq.mapi( fun i t -> i,t)
@@ -317,9 +337,19 @@ let GetClozable ( da : DocumentAnnotation ) =
                 |> Seq.map( fun (g,gtSeq) ->
                     let start = (gtSeq |> Seq.minBy fst) |> fst
                     let stop = (gtSeq |> Seq.maxBy fst) |> fst
-                    GetModifiedNPClozable sen start stop None [ "srl" |> Trace ; pred.description |> Trace;  g |> SemanticRole ])
+                    GetModifiedNPClozable sa start stop None [ "srl" |> Trace ; pred.description |> Trace;  g |> SemanticRole ])
             )
         )
+
+        // add tags; note some rely on da-level information and so really belong here and not elsewhere
+        for i = 0 to clozable.Count - 1 do
+            let tags = ResizeArray( clozable.[i].tags )
+            tags.Add( sa |>  GetTotalWeight da.coreference |> Tag.SentenceWeight )
+            tags.Add( clozable.[i].prob |> Tag.ClozeProbability )
+            tags.Add( corefresolvedSentences.[ sa.id ] |> Tag.CorefResolution)
+            tags.Add( sa.sen |> Paraphrase.getParaphrase |> Tag.Paraphrase )
+            //update clozable record
+            clozable.[i] <- { clozable.[i] with tags = tags |> Seq.toList }
 
         clozable
     )
@@ -339,7 +369,7 @@ let GetAllCloze (nlpJsonOption: string option) ( chunksJsonOption : string optio
 
         match nlpResult with
         | Ok(da) ->
-            let clozables = da |> GetClozable |> Array.map( fun ra -> ra.ToArray() )
+            let clozables = da |> GetClozables |> Array.map( fun ra -> ra.ToArray() )
             return Ok( {sentences = da.sentences; coreference = da.coreference; clozables = clozables} )
         | Error(e) -> 
             return Error(e)
@@ -356,7 +386,7 @@ let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( chunksJsonOpt
         match nlpResult with
         //sentence,cloze,sentenceWeight,clozeProbability
         | Ok(da) ->
-            let clozables = da |> GetClozable |> Array.map( fun ra -> ra.ToArray() )
+            let clozables = da |> GetClozables |> Array.map( fun ra -> ra.ToArray() )
             // return Ok( {sentences = da.sentences; coreference = da.coreference; clozables = clozables} )
             let output = 
                 da.sentences
@@ -393,14 +423,83 @@ let RemoveOverlappingClozables (clozables : Clozable[] ) =
     //
     clozablesOut.ToArray()
 
+//Import node diff
+type IChangeObject =
+    abstract value : string with get
+    abstract added : bool option with get
+    abstract removed : bool option with get
+type IJsDiff =
+    abstract diffWords : string * string * obj -> IChangeObject array
+[<ImportAll("jsdiff")>]
+let diff : IJsDiff = jsNative
+
+/// Perform item transformations (coref resolution/paraphrase) as applicable
+/// Store these alternatives as tags
+let MakeItemWithTranformations (sa:SentenceAnnotation) (cl:Clozable) =
+    //default item
+    let blank = [| for _ = cl.start to cl.stop do yield "__________" |] |> String.concat " "
+    let sentence = Array.copy sa.srl.words |> String.concat " "
+    let cloze = cl.words |> String.concat " "
+    let item = System.Text.RegularExpressions.Regex.Replace( sentence, @"\b" + cloze + @"\b", blank) |> AllenNLP.removePrePunctuationSpaces
+
+    let crOption = cl.tags |> List.choose( function | Tag.CorefResolution sen -> Some(sen) | _ ->  None ) |> List.tryHead
+    let paOption = cl.tags |> List.choose( function | Tag.Paraphrase sen -> Some(sen) | _ ->  None ) |> List.tryHead
+    let tags = cl.tags |> List.filter( function | Tag.CorefResolution  _ | Tag.Paraphrase _ -> false | _ -> true )
+    match crOption,paOption with
+    | Some(cr),Some(pa) ->
+        //attempt to make paraphrase item; will be identical to pa if clozeAnswer isn't found
+        let paItem = System.Text.RegularExpressions.Regex.Replace( pa, @"\b" + cloze + @"\b", blank)
+        //attempt to make coref resolve variant of item; will be identical to cr if clozeAnswer isn't found
+        //NOTE: we must handle resolution in clozeAnswer as well
+        //map of diffs: original -> replacement
+        let diffMap = 
+            diff.diffWords( sa.sen, cr, {| ignoreCase = true |} )
+            //remove portions that did not change with coref resolution
+            |> Array.filter( fun co -> co.added.IsSome || co.removed.IsSome) 
+            //separate deleted words (e.g. pronouns) and added words (referents) into two lists
+            |> Array.partition( fun co -> co.removed.IsSome)
+            |> fun(removed,added) ->
+                //strong assumption of equal lengths should always hold, but if it fails we can't trust the alignment of words and their replacements
+                if removed.Length <> added.Length then [||]
+                else
+                [|
+                    for i = 0 to removed.Length - 1 do
+                        yield (removed.[i].value,added.[i].value)
+                |]
+            |> Map.ofArray
+        let crCloze =
+            match diffMap.TryFind cloze with
+            | Some(diffCloze) -> diffCloze
+            | None -> cloze
+        let crItem = System.Text.RegularExpressions.Regex.Replace( cr, @"\b" + crCloze + @"\b", blank)
+
+        //handle cases for transformations
+        //all equal, no transformations, purge existing transformation tags
+        if cr = sa.sen && pa = sa.sen then
+            item, cloze, tags
+        //pa only, pa item succeeded, make item with pa tag
+        elif cr = sa.sen && pa <> sa.sen && pa <> paItem then
+            item, cloze, Tag.Paraphrase(paItem)::tags
+        // //cr only, make item with cr tag
+        // | Some(cr),Some(pa) when (cr <> sa.sen && pa = sa.sen) -> []
+        // //pa and cr, make items for both
+        // | Some(cr),Some(pa) when (cr <> sa.sen && pa <> sa.sen) -> []
+        else
+            item, cloze, tags
+    //partial or total transformation failure, purge existing tags
+    | _ , _ -> item, cloze, tags
+
 /// Return an item as a sentence with words blanked out, together with the corresponding words
 /// Modified to blank out ALL occurances of clozeAnswer, even if they appear multiple times
+/// Modified to perform optional item transformations (coref resolution/paraphrase)
 let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
     let blank = [| for _ = cl.start to cl.stop do yield "__________" |] |> String.concat " "
     let sentence = Array.copy sa.srl.words |> String.concat " "
     let cloze = cl.words |> String.concat " "
     let item = System.Text.RegularExpressions.Regex.Replace( sentence, @"\b" + cloze + @"\b", blank) |> AllenNLP.removePrePunctuationSpaces
     item,cloze
+
+// Original version
 // let MakeItem (sa:SentenceAnnotation) (cl:Clozable)=
 //     let itemWords = Array.copy sa.srl.words
 //     for i = cl.start to cl.stop do
@@ -582,9 +681,7 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
                             match acronymMap.TryFind(correctResponse) with
                             | Some( acronym ) -> correctResponse + "|" + acronym // + if doTrace then "~" + (cl.trace |> String.concat "~") else ""
                             | None -> correctResponse //+ if doTrace then "~" + (cl.trace |> String.concat "~") else ""
-                        //construct tags here
 
-                        
                         clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash cloze; correctResponse = correctResponses; tags=tags} ) 
                     )
                 )

@@ -529,12 +529,11 @@ let resolveReferents ( da : DocumentAnnotation ) =
 
                 let originalWords = sa.dep.words.[  sa.cor.spans.[i].[0] ..  sa.cor.spans.[i].[1] ] |> String.concat " "
                 // if we have a clusterReferent for this span
-                // if clusterReferents.[i].IsSome then
                 if spanIsPronominal sa sa.cor.spans.[i] && clusterReferents.[i].IsSome then
                     // replace the first word of span with clusterReferent (which could be multiword)
-                    // indexedWords.[ sa.cor.spans.[i].[0] ] <- clusterReferents.[i].Value
+                    indexedWords.[ sa.cor.spans.[i].[0] ] <- clusterReferents.[i].Value
                     //for debugging, see original + alternatives
-                    indexedWords.[ sa.cor.spans.[i].[0] ] <- "(" + originalWords + "|" + clusterReferents.[i].Value + ")"
+                    // indexedWords.[ sa.cor.spans.[i].[0] ] <- "(" + originalWords + "|" + clusterReferents.[i].Value + ")"
                     // blank out the remaining words in the span
                     for j = sa.cor.spans.[i].[0] + 1 to sa.cor.spans.[i].[1] do //TODO check end inclusive
                         indexedWords.[ j ] <- ""
@@ -543,7 +542,7 @@ let resolveReferents ( da : DocumentAnnotation ) =
                     ()
 
             // Return the indexed words as a string, without blanks
-            indexedWords |> Array.filter( fun w -> w.Length > 0 ) |> String.concat " "
+            indexedWords |> Array.filter( fun w -> w.Length > 0 ) |> String.concat " " |> removePrePunctuationSpaces
         )
     //
     resolvedSentences

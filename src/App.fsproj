@@ -3,6 +3,7 @@
     <TargetFramework>netstandard2.0</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Paraphrase.fs" />
     <Compile Include="SpellingCorrector.fs" />
     <Compile Include="DefinitionalFeedback.fs" />
     <Compile Include="WordFrequency.fs" />
