@@ -542,7 +542,12 @@ let resolveReferents ( da : DocumentAnnotation ) =
                     ()
 
             // Return the indexed words as a string, without blanks
-            indexedWords |> Array.filter( fun w -> w.Length > 0 ) |> String.concat " " |> removePrePunctuationSpaces
+            indexedWords 
+            |> Array.filter( fun w -> w.Length > 0 ) 
+            |> String.concat " " 
+            |> removePrePunctuationSpaces
+            |> String.mapi( fun i c -> match i with | 0 -> (Char.ToUpper(c)) | _ -> c) //uppercase first letter as needed
+
         )
     //
     resolvedSentences

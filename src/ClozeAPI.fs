@@ -66,9 +66,11 @@ type Tag =
     /// Word probability of rarest word in a cloze answer
     | ClozeProbability of float
     /// Source sentence with coreferents resolved
-    | CorefResolution of string
+    | ClozeCorefTransformation of string
+    /// Correct response with coreferents resolved
+    | CorrectResponseCorefTransformation of string
     /// Source sentence paraphrased
-    | Paraphrase of string
+    | ClozeParaphraseTransformation of string
     /// Transformations source sentence has undergone to make cloze item
     | Transformations of string list
     /// Debug information
@@ -346,8 +348,8 @@ let GetClozables ( da : DocumentAnnotation ) =
             let tags = ResizeArray( clozable.[i].tags )
             tags.Add( sa |>  GetTotalWeight da.coreference |> Tag.SentenceWeight )
             tags.Add( clozable.[i].prob |> Tag.ClozeProbability )
-            tags.Add( corefresolvedSentences.[ sa.id ] |> Tag.CorefResolution)
-            tags.Add( sa.sen |> Paraphrase.getParaphrase |> Tag.Paraphrase )
+            tags.Add( corefresolvedSentences.[ sa.id ] |> Tag.ClozeCorefTransformation)
+            tags.Add( sa.sen |> Paraphrase.getParaphrase |> Tag.ClozeParaphraseTransformation )
             //update clozable record
             clozable.[i] <- { clozable.[i] with tags = tags |> Seq.toList }
 
@@ -430,7 +432,7 @@ type IChangeObject =
     abstract removed : bool option with get
 type IJsDiff =
     abstract diffWords : string * string * obj -> IChangeObject array
-[<ImportAll("jsdiff")>]
+[<ImportAll("diff")>]
 let diff : IJsDiff = jsNative
 
 /// Perform item transformations (coref resolution/paraphrase) as applicable
@@ -442,9 +444,9 @@ let MakeItemWithTranformations (sa:SentenceAnnotation) (cl:Clozable) =
     let cloze = cl.words |> String.concat " "
     let item = System.Text.RegularExpressions.Regex.Replace( sentence, @"\b" + cloze + @"\b", blank) |> AllenNLP.removePrePunctuationSpaces
 
-    let crOption = cl.tags |> List.choose( function | Tag.CorefResolution sen -> Some(sen) | _ ->  None ) |> List.tryHead
-    let paOption = cl.tags |> List.choose( function | Tag.Paraphrase sen -> Some(sen) | _ ->  None ) |> List.tryHead
-    let tags = cl.tags |> List.filter( function | Tag.CorefResolution  _ | Tag.Paraphrase _ -> false | _ -> true )
+    let crOption = cl.tags |> List.choose( function | Tag.ClozeCorefTransformation sen -> Some(sen) | _ ->  None ) |> List.tryHead
+    let paOption = cl.tags |> List.choose( function | Tag.ClozeParaphraseTransformation sen -> Some(sen) | _ ->  None ) |> List.tryHead
+    let tags = cl.tags |> List.filter( function | Tag.ClozeCorefTransformation  _ | Tag.ClozeParaphraseTransformation _ -> false | _ -> true ) 
     match crOption,paOption with
     | Some(cr),Some(pa) ->
         //attempt to make paraphrase item; will be identical to pa if clozeAnswer isn't found
@@ -452,26 +454,30 @@ let MakeItemWithTranformations (sa:SentenceAnnotation) (cl:Clozable) =
         //attempt to make coref resolve variant of item; will be identical to cr if clozeAnswer isn't found
         //NOTE: we must handle resolution in clozeAnswer as well
         //map of diffs: original -> replacement
+        let diffList = diff.diffWords( sa.sen, cr, {| ignoreCase = true |} )
         let diffMap = 
-            diff.diffWords( sa.sen, cr, {| ignoreCase = true |} )
-            //remove portions that did not change with coref resolution
-            |> Array.filter( fun co -> co.added.IsSome || co.removed.IsSome) 
-            //separate deleted words (e.g. pronouns) and added words (referents) into two lists
-            |> Array.partition( fun co -> co.removed.IsSome)
-            |> fun(removed,added) ->
-                //strong assumption of equal lengths should always hold, but if it fails we can't trust the alignment of words and their replacements
-                if removed.Length <> added.Length then [||]
-                else
-                [|
-                    for i = 0 to removed.Length - 1 do
-                        yield (removed.[i].value,added.[i].value)
-                |]
+            [| 
+                let removeList = ResizeArray<string>()
+                let addList = ResizeArray<string>()
+                for d in diffList do
+                    if d.removed.IsSome then 
+                        removeList.Add( d.value )
+                    elif d.added.IsSome then
+                        addList.Add( d.value )
+                    elif d.value.Trim() = "" then
+                        () //continue to accumulate over whitespace
+                    else
+                        if removeList.Count > 0 then
+                            yield removeList |> String.concat " ", (addList |> String.concat " ").Trim()
+                            removeList.Clear(); addList.Clear();
+            |]
             |> Map.ofArray
         let crCloze =
             match diffMap.TryFind cloze with
             | Some(diffCloze) -> diffCloze
             | None -> cloze
-        let crItem = System.Text.RegularExpressions.Regex.Replace( cr, @"\b" + crCloze + @"\b", blank)
+        let crItem = System.Text.RegularExpressions.Regex.Replace( cr, @"\b" + crCloze + @"\b", blank) 
+            // |> String.mapi( fun i c -> match i with | 0 -> (Char.ToUpper(c)) | _ -> c) //uppercase first letter as needed
 
         //handle cases for transformations
         //all equal, no transformations, purge existing transformation tags
@@ -479,14 +485,20 @@ let MakeItemWithTranformations (sa:SentenceAnnotation) (cl:Clozable) =
             item, cloze, tags
         //pa only, pa item succeeded, make item with pa tag
         elif cr = sa.sen && pa <> sa.sen && pa <> paItem then
-            item, cloze, Tag.Paraphrase(paItem)::tags
-        // //cr only, make item with cr tag
-        // | Some(cr),Some(pa) when (cr <> sa.sen && pa = sa.sen) -> []
-        // //pa and cr, make items for both
-        // | Some(cr),Some(pa) when (cr <> sa.sen && pa <> sa.sen) -> []
+            item, cloze, Tag.ClozeParaphraseTransformation(paItem)::tags
+        //cr only, cr item succeeded, make item with cr tag
+        elif cr <> sa.sen && pa = sa.sen && cr <> crItem then
+            item, cloze, Tag.ClozeCorefTransformation(crItem)::Tag.CorrectResponseCorefTransformation(crCloze)::tags
+        //pa and cr, make items for both
+        elif cr <> sa.sen && pa <> sa.sen then
+            let tempTags = tags |> ResizeArray
+            if pa <> paItem then tempTags.Add( Tag.ClozeParaphraseTransformation(paItem) )
+            if cr <> crItem then tempTags.Add( Tag.ClozeCorefTransformation(crItem) ); tempTags.Add( Tag.CorrectResponseCorefTransformation(crCloze) )
+            item, cloze, tempTags |> Seq.toList
+        //something went wrong, keep basic item and purge transformation tags
         else
             item, cloze, tags
-    //partial or total transformation failure, purge existing tags
+    //partial or total transformation failure, keep basic item and purge transformation tags
     | _ , _ -> item, cloze, tags
 
 /// Return an item as a sentence with words blanked out, together with the corresponding words
@@ -666,16 +678,26 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
                 | Some(clozables) -> 
                     sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
                     clozables |> Seq.iter( fun cl -> 
+                        // //append the weight group to our tags and convert the list of tags into an object literal
+                        // let tags =  
+                        //     (importantClozeMap.[cl] |> WeightGroup) :: cl.tags @ cl.trace  
+                        //     |> List.choose( fun t ->   //filter junk tags
+                        //         match t with 
+                        //         | Deprecated(x) -> None 
+                        //         | Trace(x) -> None
+                        //         | _ -> Some(t) )
+                        //     |> keyValueList CaseRules.LowerFirst
+                        // let cloze,correctResponse = MakeItem sa cl
+                        let cloze,correctResponse, clTags = MakeItemWithTranformations sa cl
                         //append the weight group to our tags and convert the list of tags into an object literal
                         let tags =  
-                            (importantClozeMap.[cl] |> WeightGroup) :: cl.tags @ cl.trace  
+                            (importantClozeMap.[cl] |> WeightGroup) :: clTags @ cl.trace  
                             |> List.choose( fun t ->   //filter junk tags
                                 match t with 
                                 | Deprecated(x) -> None 
                                 | Trace(x) -> None
                                 | _ -> Some(t) )
                             |> keyValueList CaseRules.LowerFirst
-                        let cloze,correctResponse = MakeItem sa cl
                         //insert any alternative correct responses here
                         let correctResponses = 
                             match acronymMap.TryFind(correctResponse) with
