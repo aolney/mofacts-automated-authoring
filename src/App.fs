@@ -48,6 +48,7 @@ type Service =
   | DefinitionalFeedback
   | InitializeDefinitionalFeedback
   | InitializeSpellingCorrector
+  | InitializeParaphrase
   | TutorialDialogue
   | Test
 
@@ -139,6 +140,7 @@ let update msg (model:Model) =
       | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
       | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
+      | InitializeParaphrase -> makeCmd Paraphrase.InitializeBacktranslations model.JsonInput.Value makeServiceResult
       | TutorialDialogue -> makeCmd TutorialDialogue.GetDialogue (model.InputText |> ofJson<TutorialDialogue.DialogueState> ) makeServiceResult
       | Test -> makeCmd (AllenNLP.resolveReferents >> AllenNLP.Promisify) (model.JsonInput.Value |> ofJson<AllenNLP.DocumentAnnotation> ) makeServiceResult
 
@@ -232,6 +234,7 @@ let view model dispatch =
                   option [ Value Service.DefinitionalFeedback ] [ str "Definitional Feedback" ]
                   option [ Value Service.InitializeDefinitionalFeedback ] [ str "Initialize Definitional Feedback" ]
                   option [ Value Service.InitializeSpellingCorrector ] [ str "Initialize Spelling Corrector" ]
+                  option [ Value Service.InitializeParaphrase ] [ str "Initialize Paraphrase" ]
                   option [ Value Service.Triples ] [ str "Triples" ]
                   option [ Value Service.NLP ] [ str "Composite NLP" ]
                   option [ Value Service.SRL ] [ str "SRL Parse" ]
@@ -253,6 +256,7 @@ let view model dispatch =
                         model.Service <> Service.DefinitionalFeedback &&
                         model.Service <> Service.InitializeDefinitionalFeedback &&
                         model.Service <> Service.InitializeSpellingCorrector &&
+                        model.Service <> Service.InitializeParaphrase &&
                         model.Service <> Service.Test
                         )] [
             Label.label [ ] [ str "Optional JSON (e.g. parse)" ]
