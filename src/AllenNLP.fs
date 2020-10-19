@@ -266,13 +266,13 @@ let CleanText input =
     // |> RegexReplace "\s+([\.\?!;,])" "$1" //replacements leave spaces before final punctuation
     |> transliteration.transliterate
 
-/// Call all NLP functions either for chunks of text, where each chunk represents a semantic grouping 
+/// Call all NLP functions either for a JSON array of text, where each element represents a semantic grouping 
 /// (i.e. chapter section) of the same type, OR for a single piece of text. If both are passed, chunks have priority.
 /// Service failures create meaningful error messages and stop execution.
-let GetNLP( chunksJsonOption : string option ) ( inputText : string )=
+let GetNLP( stringArrayJsonOption : string option ) ( inputText : string )=
     promise {
         let chunks = 
-            match chunksJsonOption with
+            match stringArrayJsonOption with
             | Some( chunksJson ) -> chunksJson |> ofJson<string[]>
             //treat inputText as a single chunk
             | None -> [| inputText |]
