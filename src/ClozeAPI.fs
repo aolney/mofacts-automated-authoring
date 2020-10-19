@@ -359,15 +359,16 @@ let GetClozables ( da : DocumentAnnotation ) =
 ///To throw away sentences we don't know how to handle
 let badSentenceRegex = System.Text.RegularExpressions.Regex( "(figure|table|section|clinical|application)\s+[0-9]",Text.RegularExpressions.RegexOptions.IgnoreCase)
 
-/// Generates clozables for every sentence when given a block of text and an optional JSON of DocumentAnnotation (a serialized parse)
+/// Generates clozables for every sentence when given text and an optional JSON of DocumentAnnotation (a serialized parse)
+/// Text input may be a JSON encoded string array or a string
 /// NOTE: input may be empty if serialized parse is passed in.
-let GetAllCloze (nlpJsonOption: string option) ( chunksJsonOption : string option) ( inputText : string )=
+let GetAllCloze (nlpJsonOption: string option) ( stringArrayJsonOption : string option) ( inputText : string )=
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
         let! nlpResult = 
             match nlpJsonOption with
             | Some(nlpJson) -> nlpJson |> ofJson<DocumentAnnotation> |> Promisify 
-            | None -> GetNLP chunksJsonOption inputText 
+            | None -> GetNLP stringArrayJsonOption inputText 
 
         match nlpResult with
         | Ok(da) ->
@@ -388,13 +389,13 @@ type IJsDiff =
 let diff : IJsDiff = jsNative
 
 
-let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( chunksJsonOption : string option) ( inputText : string )=
+let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( stringArrayJsonOption : string option) ( inputText : string )=
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
         let! nlpResult = 
             match nlpJsonOption with
             | Some(nlpJson) -> nlpJson |> ofJson<DocumentAnnotation> |> Promisify 
-            | None -> GetNLP chunksJsonOption inputText 
+            | None -> GetNLP stringArrayJsonOption inputText 
 
         match nlpResult with
         //sentence,cloze,sentenceWeight,clozeProbability
@@ -465,7 +466,9 @@ let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( chunksJsonOpt
 /// b entirely inside a
 /// all covered with a.start < b.end && b.start < a.end;
 let RemoveOverlappingClozables (clozables : Clozable[] ) =
-    let clozablesOut = ResizeArray<Clozable>(clozables)
+    // let clozablesOut = ResizeArray<Clozable>(clozables)
+    // TODO: magic length parameter should be passed in not hard coded
+    let clozablesOut = ResizeArray<Clozable>(clozables |> Array.filter( fun cl -> cl.words.Length < 4 ))
     for ci = 0 to clozables.Length - 1 do
         for cj = ci to clozables.Length - 1 do
             let overlap =  ci <> cj && clozables.[ci].start <= clozables.[cj].stop && clozables.[cj].start <= clozables.[ci].stop
@@ -595,10 +598,10 @@ let GetAcronymMap input =
 /// Returns select clozables given a target number by ranking clozables and returning top ranked.
 /// Since target numbers may be impossible to satisfy, does not guarantee returning the target quantities.
 /// Accepts optional serialized NLP, #sentences/items, and chunks of text (e.g. subsections). Any of these override the default if present.
-/// inputText (as a single chunk) is the default of chunksJsonOption and so may be empty if chunksJsonOption exists.
-let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int option) (itemCountOption: int option) (doTrace : bool) ( chunksJsonOption : string option) ( inputText : string ) = 
+/// inputText (as a single chunk) is the default of stringArrayJsonOption and so may be empty if stringArrayJsonOption exists.
+let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int option) (itemCountOption: int option) (doTrace : bool) ( stringArrayJsonOption : string option) ( inputText : string ) = 
     promise{
-        let! allClozeResult = GetAllCloze nlpJsonOption chunksJsonOption inputText
+        let! allClozeResult = GetAllCloze nlpJsonOption stringArrayJsonOption inputText
 
         match allClozeResult with
         | Ok( allCloze ) ->
@@ -629,8 +632,10 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
                 |> Array.map( fun ( sa, cls ) -> sa, cls |> Array.filter( fun cl -> cl.words.Length < 4 ) )
                 //Filter sentences with no clozables
                 |> Array.filter( fun (_,cl) -> cl.Length > 0 )
-                |> Array.toList
+                //Remove duplicates defined by senId and clozeWords; guards against case where clozeWords are repeated in a sentence
+                |> Array.map( fun (sa,cls) -> sa, cls |> Array.distinctBy( fun cl -> cl.words ) )
                 //Apply strict criteria to create partition
+                |> Array.toList
                 |> List.partition( fun (sa,_) ->
                     let chainsLengthTwoOrMore = 
                         sa.cor.clusters 
@@ -705,7 +710,7 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
 
             //Create acronym map to expand "correct" answers for items
             let input = 
-                match chunksJsonOption with
+                match stringArrayJsonOption with
                 | Some(chunksJson) -> chunksJson |> ofJson<string[]>
                 | None -> [| inputText |]
             let acronymMap = input |> String.concat " " |> GetAcronymMap |> ofJson<Map<string,string>> 
