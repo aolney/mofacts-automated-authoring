@@ -262,6 +262,8 @@ let CleanText input =
     |> RegexReplace "\{[^\}]+\}" "" //This one is a bit strong: we remove ALL parenthetical material (creates a mess with cloze)
     |> RegexReplace "\s+" " "
     |> RegexReplace " \.$" "." //replacements leave spaces before final period
+    //TODO: possible replacement for above
+    // |> RegexReplace "\s+([\.\?!;,])" "$1" //replacements leave spaces before final punctuation
     |> transliteration.transliterate
 
 /// Call all NLP functions either for chunks of text, where each chunk represents a semantic grouping 
