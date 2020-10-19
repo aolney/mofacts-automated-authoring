@@ -377,6 +377,17 @@ let GetAllCloze (nlpJsonOption: string option) ( chunksJsonOption : string optio
             return Error(e)
     }
 
+//Import node diff
+type IChangeObject =
+    abstract value : string with get
+    abstract added : bool option with get
+    abstract removed : bool option with get
+type IJsDiff =
+    abstract diffWords : string * string * obj -> IChangeObject array
+[<ImportAll("diff")>]
+let diff : IJsDiff = jsNative
+
+
 let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( chunksJsonOption : string option) ( inputText : string )=
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
@@ -395,7 +406,48 @@ let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( chunksJsonOpt
                 |> Array.mapi( fun i sa ->
                     let totalWeight = sa |>  GetTotalWeight da.coreference
                     clozables.[i]
-                    |> Array.map( fun cl -> {|Sentence=sa.sen; Cloze=cl.words |> String.concat " "; SentenceWeight=totalWeight; ClozeProbability=cl.prob |}
+                    |> Array.map( fun cl -> 
+                        let cloze = cl.words |> String.concat " "
+                        let sentence = sa.sen |> AllenNLP.removePrePunctuationSpaces
+                        //map coreferents
+                        let crOption = cl.tags |> List.choose( function | Tag.ClozeCorefTransformation sen -> Some(sen) | _ ->  None ) |> List.tryHead
+                        match crOption with
+                        | Some(cr) ->
+                            //attempt to make coref resolve variant of item; will be identical to cr if clozeAnswer isn't found
+                            //NOTE: we must handle resolution in clozeAnswer as well
+                            //map of diffs: original cloze -> coref replacement cloze
+                            let diffList = diff.diffWords( sa.sen, cr, {| ignoreCase = true |} )
+                            let diffMap = 
+                                [| 
+                                    let removeList = ResizeArray<string>()
+                                    let addList = ResizeArray<string>()
+                                    for d in diffList do
+                                        if d.removed.IsSome then 
+                                            removeList.Add( d.value )
+                                        elif d.added.IsSome then
+                                            addList.Add( d.value )
+                                        elif d.value.Trim() = "" then
+                                            () //continue to accumulate over whitespace
+                                        else
+                                            if removeList.Count > 0 then
+                                                yield removeList |> String.concat " ", (addList |> String.concat " ").Trim()
+                                                removeList.Clear(); addList.Clear();
+                                |]
+                                |> Map.ofArray
+                            //correct response
+                            let crCloze =
+                                match diffMap.TryFind cloze with
+                                | Some(diffCloze) -> diffCloze
+                                | None -> cloze
+
+                            if sentence <> cr then
+                                {|Sentence=cr; Cloze=crCloze ; SentenceWeight=totalWeight; ClozeProbability=cl.prob |} //; OriginalSen=sa.sen |}
+                            else
+                                {|Sentence=sentence; Cloze=cl.words |> String.concat " "; SentenceWeight=totalWeight; ClozeProbability=cl.prob |} // ; OriginalSen="" |}
+                                
+                        //no coref resolution
+                        | _ -> 
+                            {|Sentence=sentence; Cloze=cl.words |> String.concat " "; SentenceWeight=totalWeight; ClozeProbability=cl.prob |} //; OriginalSen="" |}
                     )
                 )
             
@@ -425,15 +477,6 @@ let RemoveOverlappingClozables (clozables : Clozable[] ) =
     //
     clozablesOut.ToArray()
 
-//Import node diff
-type IChangeObject =
-    abstract value : string with get
-    abstract added : bool option with get
-    abstract removed : bool option with get
-type IJsDiff =
-    abstract diffWords : string * string * obj -> IChangeObject array
-[<ImportAll("diff")>]
-let diff : IJsDiff = jsNative
 
 /// Perform item transformations (coref resolution/paraphrase) as applicable
 /// Store these alternatives as tags
