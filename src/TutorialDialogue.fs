@@ -174,7 +174,11 @@ type DialogueState =
         Finished : bool option
     } with
     static member Initialize( clozeItem )( clozeAnswer) = { ClozeItem = clozeItem; ClozeAnswer = clozeAnswer; Questions = None; LastQuestion = None; LastStudentAnswer = None; CurrentFeedback = None; CurrentElaboration = None; CurrentQuestion = None; Display = None; Finished = None }
-    static member InitializeTest() = DialogueState.Initialize "The supraspinatus is located in the depression above the spine of the scapula on its _______ _______." "posterior surface"
+    // static member InitializeTest() = DialogueState.Initialize "The supraspinatus is located in the depression above the spine of the scapula on its _______ _______." "posterior surface"
+    // static member InitializeTest() = DialogueState.Initialize "Human anatomy and physiology are the studies of the _______ _______ and how it works." "human body"
+    // static member InitializeTest() = DialogueState.Initialize """Cells are specialized to take on specific and "necessary responsibilities", and together they maintain an environment within _____ _____ in which they can all live.""" "the body"
+    // static member InitializeTest() = DialogueState.Initialize """Parts of the axial portion of the body can be described using terms similar to the names of the __________ within them.""" "cavities"
+    static member InitializeTest() = DialogueState.Initialize """The interstitial fluid, which bathes cells in the body, is the environment to which those cells are most directly exposed, but the composition of the interstitial fluid is in equilibrium with the composition of the blood plasma, so both contribute to the ______ ______""" "internal environment"
 
 let GetDialogue (state:DialogueState) =
     promise{
