@@ -397,7 +397,19 @@ let getDependentIndices ( start : int ) ( sa : SentenceAnnotation ) =
             hbar <- sa.dep.predicted_heads.[hbar] - 1
         //add where we stopped as a dependency only if it is a dependent of start or start itself
         if hbar = start || i = start then dependents.Add(i)
-    dependents.ToArray()
+    //if copula, then predicate is root but we don't want the whole sentence; HACK: chop off everything including copula
+    if sa.dep.predicted_heads.[start] = 0 && not <| sa.dep.pos.[start].StartsWith("VB") then 
+        //find copula index (if it exists)
+        let copulaIndex = dependents |> Seq.mapi( fun i d -> i,d ) |> Seq.tryFindIndex( fun (i,d) -> sa.dep.predicted_dependencies.[i] = "cop" )
+        match copulaIndex with
+        //do not allow copula to be the last word; get everything after copula
+        | Some(i) when i < dependents.Count - 1 -> dependents |> Seq.skip 1 |> Seq.toArray
+        | _ -> Array.empty
+
+        // dependents |> Seq.mapi( fun i d -> i,d ) |> Seq.skipWhile( fun (i,d) -> sa.dep.predicted_dependencies.[i] <> "cop" ) |> Seq.skip 1 |> Seq.map snd |> Seq.toArray
+        
+    else
+        dependents.ToArray()
 
 /// Convert SRL BIO tags to a map with key as tag without BIO prefix and value a list of tag/index tuples for that tag
 let srlArgToIndexMap (srlTags : string[]) =
@@ -414,7 +426,7 @@ let srlArgToIndexMap (srlTags : string[]) =
 let getSubjectIndex ( sa : SentenceAnnotation ) = 
     let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
     //the first nsubj preceding the root
-    sa.dep.predicted_dependencies.[0 .. rootIndex] |> Array.tryFindIndexBack( fun h -> h = "nsubj") 
+    sa.dep.predicted_dependencies.[0 .. rootIndex] |> Array.tryFindIndexBack( fun h -> h.StartsWith("nsubj") ) //allow for nsubjpass
 
 /// Returns the index of a "be" or copular verb when it can be viewed as the root (anti Stanford, which views copular complement as root)
 /// This check subsumes verb chaining because verb chains are broken and otherwise marked as "aux" rather than "cop"
@@ -444,7 +456,7 @@ let getPredicateIndex ( sa : SentenceAnnotation ) =
         |> Array.mapi( fun i h -> i,h - 1)
         |> Array.tryFindIndex( fun (i,h) -> h = rootIndex && sa.dep.predicted_dependencies.[i] = "dobj" )
     else
-        rootIndex |> Some //TODO: SPAN WILL DOMINATE S
+        rootIndex |> Some //NOTE: SPAN WILL DOMINATE S
 
 /// Get referent label that best represents coreferents in chain
 let resolveReferents ( da : DocumentAnnotation ) =
