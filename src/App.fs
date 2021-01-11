@@ -44,11 +44,15 @@ type Service =
   | AllCloze
   | SelectCloze
   | Triples
-  // | LemmInflect
+  | Lemma //assumes UPOS noun
+  | Inflection //assumes Penn NNS
   | DefinitionalFeedback
+  | Paraphrase
+  | ResolveTextReferents
+  | AnswerQuestion
   | InitializeDefinitionalFeedback
   | InitializeSpellingCorrector
-  | InitializeParaphrase
+  | InitializeParaphraseCache
   | TutorialDialogue
   | Test
 
@@ -138,9 +142,14 @@ let update msg (model:Model) =
       // Note we pass no chunks; input is used as a singleton chunk instead
       | Triples -> makeCmd (Triples.GetTriples model.JsonInput None) model.InputText makeServiceResult  
       | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
+      | Lemma -> makeCmd LemmInflect.testGetLemma model.InputText makeServiceResult
+      | Inflection -> makeCmd LemmInflect.testGetInflection model.InputText makeServiceResult
+      | Paraphrase -> makeCmd Paraphrase.getParaphrases model.InputText makeServiceResult
+      | ResolveTextReferents -> makeCmd AllenNLP.ResolveTextReferents model.InputText makeServiceResult
+      | AnswerQuestion -> makeCmd LongformQA.testAnswer model.InputText makeServiceResult
       | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
-      | InitializeParaphrase -> makeCmd Paraphrase.InitializeBacktranslations model.JsonInput.Value makeServiceResult
+      | InitializeParaphraseCache -> makeCmd Paraphrase.InitializeParaphraseCache model.JsonInput.Value makeServiceResult
       | TutorialDialogue -> makeCmd TutorialDialogue.GetDialogue (model.InputText |> ofJson<TutorialDialogue.DialogueState> ) makeServiceResult
       | Test -> makeCmd (AllenNLP.resolveReferents >> AllenNLP.Promisify) (model.JsonInput.Value |> ofJson<AllenNLP.DocumentAnnotation> ) makeServiceResult
 
@@ -234,12 +243,17 @@ let view model dispatch =
                   option [ Value Service.DefinitionalFeedback ] [ str "Definitional Feedback" ]
                   option [ Value Service.InitializeDefinitionalFeedback ] [ str "Initialize Definitional Feedback" ]
                   option [ Value Service.InitializeSpellingCorrector ] [ str "Initialize Spelling Corrector" ]
-                  option [ Value Service.InitializeParaphrase ] [ str "Initialize Paraphrase" ]
+                  option [ Value Service.InitializeParaphraseCache ] [ str "Initialize Paraphrase" ]
                   option [ Value Service.Triples ] [ str "Triples" ]
                   option [ Value Service.NLP ] [ str "Composite NLP" ]
+                  option [ Value Service.Lemma ] [ str "Lemma (assumes noun)" ]
+                  option [ Value Service.Inflection ] [ str "Inflection (assumes NNS)" ]
+                  option [ Value Service.Paraphrase ] [ str "Paraphrase" ]
+                  option [ Value Service.ResolveTextReferents ] [ str "Resolve Coreference" ]
+                  option [ Value Service.AnswerQuestion ] [ str "Answer Question" ]
                   option [ Value Service.SRL ] [ str "SRL Parse" ]
                   option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
-                  option [ Value Service.Coreference ] [ str "Coreference" ] 
+                  option [ Value Service.Coreference ] [ str "Coreference Annotation" ] 
                   option [ Value Service.SentenceSplitter ] [ str "Sentence Splitter" ] 
                   option [ Value Service.CleanText  ] [ str "Clean Text" ] 
                   option [ Value Service.Acronym  ] [ str "Acronym" ] 
@@ -256,7 +270,7 @@ let view model dispatch =
                         model.Service <> Service.DefinitionalFeedback &&
                         model.Service <> Service.InitializeDefinitionalFeedback &&
                         model.Service <> Service.InitializeSpellingCorrector &&
-                        model.Service <> Service.InitializeParaphrase &&
+                        model.Service <> Service.InitializeParaphraseCache &&
                         model.Service <> Service.Test
                         )] [
             Label.label [ ] [ str "Optional JSON (e.g. parse)" ]

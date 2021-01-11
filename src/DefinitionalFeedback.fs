@@ -170,3 +170,9 @@ let GenerateFeedback incorrectAnswer correctAnswer =
 let HarnessGenerateFeedback jsonFeedbackRequest =
     let fr = jsonFeedbackRequest |> ofJson<FeedbackRequest>
     GenerateFeedback fr.IncorrectAnswer fr.CorrectAnswer
+
+/// Very simplistic approach to turning non-sentential glossary entries into sentences
+let GetDefinitionFromGlossary( term : string) =
+    match definitionMap.TryFind( term ) with
+    | Some(entry) -> getDeterminerPhrase( term ) + " " + getPredicate( entry ) |> Some
+    | None -> None

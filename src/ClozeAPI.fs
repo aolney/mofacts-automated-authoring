@@ -349,7 +349,7 @@ let GetClozables ( da : DocumentAnnotation ) =
             tags.Add( sa |>  GetTotalWeight da.coreference |> Tag.SentenceWeight )
             tags.Add( clozable.[i].prob |> Tag.ClozeProbability )
             tags.Add( corefresolvedSentences.[ sa.id ] |> Tag.ClozeCorefTransformation)
-            tags.Add( sa.sen |> Paraphrase.getParaphrase |> Tag.ClozeParaphraseTransformation )
+            tags.Add( sa.sen |> Paraphrase.getCachedParaphrase |> Tag.ClozeParaphraseTransformation )
             //update clozable record
             clozable.[i] <- { clozable.[i] with tags = tags |> Seq.toList }
 

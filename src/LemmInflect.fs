@@ -11,7 +11,6 @@ open Thoth.Fetch
 importSideEffects "isomorphic-fetch"
 
 [<StringEnum>]
-
 type UPOS = 
     /// adjective
     | [<CompiledName("ADJ")>] ADJ  
@@ -48,6 +47,7 @@ type UPOS =
     /// other
     | [<CompiledName("X")>] X  
 
+[<StringEnum>]
 type PennPOS =
     ///Coordinating conjunction
     | [<CompiledName("CC")>] CC 
@@ -124,6 +124,12 @@ type PennPOS =
 
 let lemmInflectEndpoint = "https://lemminflect.olney.ai/api/"
 
+// NOTE: sometimes when we use anonymous records in the requests, they are rendered as empty payloads later, so we manually specify all requests
+type LemmaRequest = { word : string ; upos : UPOS } 
+type LemmaOovRequest = { word : string ; upos : UPOS ; lemmatize_oov : bool }
+type TagRequest = { tag : PennPOS } 
+type InflectionOovRequest = { lemma : string ; tag : PennPOS ; inflect_oov : bool } 
+type InflectionRequest = { lemma : string ; upos : UPOS } 
 /// This methods aggregates getAllLemmas and getAllLemmasOOV. 
 /// It first tries to find the lemma using the dictionary based lookup. 
 /// If no forms are available, it then tries to find the lemma using the rules system. 
@@ -134,10 +140,13 @@ let lemmInflectEndpoint = "https://lemminflect.olney.ai/api/"
 /// word: word to lemmatize
 /// upos: Universal Dependencies part of speech the return is limited to
 /// lemmatize_oov: Allow the method to use the rules based lemmatizer for words not in the dictionary
-let getLemma(word: string)(upos :UPOS)(lemmatize_oov : bool) : JS.Promise<Result<string,FetchError>> =
+let getLemma(word: string)(upos :UPOS)(lemmatize_oov : bool) : JS.Promise<Result<string[],FetchError>> =
     promise {
-        return! Fetch.tryPost( lemmInflectEndpoint + "getLemma", {| word=word; upos=upos; lemmatize_oov = lemmatize_oov  |}, caseStrategy = SnakeCase)
+        // return! Fetch.tryPost( lemmInflectEndpoint + "getLemma", {| word=word; upos=upos; lemmatize_oov = lemmatize_oov  |}, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( lemmInflectEndpoint + "getLemma", { word=word; upos=upos; lemmatize_oov = lemmatize_oov  }, caseStrategy = SnakeCase)
     }
+let testGetLemma(word: string) = getLemma word UPOS.NOUN true
+
 /// Returns lemmas for the given word. 
 /// The format of the return is a dictionary where each key is the upos tag 
 /// and the value is a tuple of possible spellings.
@@ -146,7 +155,7 @@ let getLemma(word: string)(upos :UPOS)(lemmatize_oov : bool) : JS.Promise<Result
 /// upos: Universal Dependencies part of speech tag the returned values are limited to
 let getAllLemmas(word: string)(upos :UPOS) : JS.Promise<Result<Map<UPOS,string[]>,FetchError>> =
     promise {
-        return! Fetch.tryPost( lemmInflectEndpoint + "getAllLemmas", {| word=word; upos=upos |}, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( lemmInflectEndpoint + "getAllLemmas", { word=word; upos=upos }, caseStrategy = SnakeCase)
     }
 /// Similar to getAllLemmas except that the rules system is used for lemmatization, instead of the dictionary. The return format is the same as well.
 /// Arguments
@@ -154,16 +163,16 @@ let getAllLemmas(word: string)(upos :UPOS) : JS.Promise<Result<Map<UPOS,string[]
 /// upos: Universal Dependencies part of speech tag the returned values are limited to
 let getAllLemmasOOV(word: string)(upos :UPOS) : JS.Promise<Result<Map<UPOS,string[]>,FetchError>> =
     promise {
-        return! Fetch.tryPost( lemmInflectEndpoint + "getAllLemmasOOV", {| word=word; upos=upos |}, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( lemmInflectEndpoint + "getAllLemmasOOV", { word=word; upos=upos }, caseStrategy = SnakeCase)
     }
 /// Returns True or False if the Penn Tag is a lemma form. This is useful since lemmatizing a lemma can lead to errors. The upos tags used in the above methods don't have enough information to determine this, but the Penn tags do.
 /// Arguments
 /// tag: Penn Treebank tag
 let isTagBaseForm(tag: PennPOS) : JS.Promise<Result<bool,FetchError>> =
     promise {
-        return! Fetch.tryPost( lemmInflectEndpoint + "isTagBaseForm", {| tag=tag |}, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( lemmInflectEndpoint + "isTagBaseForm", { tag=tag }, caseStrategy = SnakeCase)
     }
-/// The method returns the inflection for the given lemma based on te PennTreebank tag. 
+/// The method returns the inflection for the given lemma based on the PennTreebank tag. 
 /// It first calls getAllInflections and if none were found, calls getAllInflectionsOOV. 
 /// The flag allows the user to disable the rules based inflections. 
 /// The return from the method is a tuple of different spellings for the inflection.
@@ -171,10 +180,14 @@ let isTagBaseForm(tag: PennPOS) : JS.Promise<Result<bool,FetchError>> =
 /// lemma: the word to inflect
 /// tag: the Penn-Treebank tag
 /// inflect_oov: if False the rules sytem will not be used.
-let getInflection(lemma: string)(tag :PennPOS)(inflect_oov : bool) : JS.Promise<Result<string,FetchError>> =
+let getInflection(lemma: string)(tag :PennPOS)(inflect_oov : bool) : JS.Promise<Result<string[],FetchError>> =
     promise {
-        return! Fetch.tryPost( lemmInflectEndpoint + "getInflection", {| lemma=lemma; tag=tag; inflect_oov = inflect_oov  |}, caseStrategy = SnakeCase)
+        // return! Fetch.tryPost( lemmInflectEndpoint + "getInflection", {| lemma=lemma; tag=tag; inflect_oov = inflect_oov  |}, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( lemmInflectEndpoint + "getInflection", { lemma=lemma; tag=tag; inflect_oov = inflect_oov  }, caseStrategy = SnakeCase)
     }
+
+let testGetInflection(lemma: string) = getInflection lemma PennPOS.NNS true
+
 /// This method does a dictionary lookup of the word and returns all lemmas. 
 /// Optionally, the upos tag may be used to limit the returned values to a specific part-of-speech. 
 /// The return value is a dictionary where the key is the Penn Treebank tag 
@@ -184,7 +197,7 @@ let getInflection(lemma: string)(tag :PennPOS)(inflect_oov : bool) : JS.Promise<
 /// upos: Universal Dependencies part of speech tag the returned values are limited to
 let getAllInflections(lemma: string)(upos :UPOS) : JS.Promise<Result<Map<PennPOS,string[]>,FetchError>> =
     promise {
-        return! Fetch.tryPost( lemmInflectEndpoint + "getAllInflections", {| lemma=lemma; upos=upos |}, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( lemmInflectEndpoint + "getAllInflections", { lemma=lemma; upos=upos }, caseStrategy = SnakeCase)
     }
 /// Similary to getAllInflections, but uses the rules system to inflect words.
 /// Arguments
@@ -192,5 +205,5 @@ let getAllInflections(lemma: string)(upos :UPOS) : JS.Promise<Result<Map<PennPOS
 /// upos: Universal Dependencies part of speech tag the returned values are limited to
 let getAllInflectionsOOV(lemma: string)(upos :UPOS) : JS.Promise<Result<Map<PennPOS,string[]>,FetchError>> =
     promise {
-        return! Fetch.tryPost( lemmInflectEndpoint + "getAllInflectionsOOV", {| lemma=lemma; upos=upos |}, caseStrategy = SnakeCase)
+        return! Fetch.tryPost( lemmInflectEndpoint + "getAllInflectionsOOV", { lemma=lemma; upos=upos }, caseStrategy = SnakeCase)
     }
