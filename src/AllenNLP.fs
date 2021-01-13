@@ -575,7 +575,7 @@ let ResolveTextReferents ( inputText : string ) =
         match nlpResult with
         | Ok(da) ->
             let resolvedSentences = da |> resolveReferents
-            return Ok( {|sentences = resolvedSentences|} ) //NOTE: anonymous type
+            return Ok( {|resolvedSentences = resolvedSentences; documentAnnotation = da|} ) //NOTE: anonymous type
         | Error(e) -> 
             return Error(e)
     }

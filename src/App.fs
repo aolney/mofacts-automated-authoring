@@ -46,6 +46,7 @@ type Service =
   | Triples
   | Lemma //assumes UPOS noun
   | Inflection //assumes Penn NNS
+  | ElaboratedFeedback
   | DefinitionalFeedback
   | Paraphrase
   | ResolveTextReferents
@@ -142,6 +143,7 @@ let update msg (model:Model) =
       // Note we pass no chunks; input is used as a singleton chunk instead
       | Triples -> makeCmd (Triples.GetTriples model.JsonInput None) model.InputText makeServiceResult  
       | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
+      | ElaboratedFeedback -> makeCmd (LongformQA.HarnessGetElaboratedFeedback) model.InputText makeServiceResult
       | Lemma -> makeCmd LemmInflect.testGetLemma model.InputText makeServiceResult
       | Inflection -> makeCmd LemmInflect.testGetInflection model.InputText makeServiceResult
       | Paraphrase -> makeCmd Paraphrase.getParaphrases model.InputText makeServiceResult
@@ -171,6 +173,7 @@ let update msg (model:Model) =
       match service with
       // | TutorialDialogue -> TutorialDialogue.DialogueState.Initialize "" "" |> toJson
       | TutorialDialogue -> TutorialDialogue.DialogueState.InitializeTest() |> toJson
+      | ElaboratedFeedback -> LongformQA.HarnessElaboratedFeedbackRequest.InitializeTest() |> toJson
       | _ -> ""
     ( {model with Service=service; Status=""; InputText = inputText}, [])
   | DownloadJson ->
@@ -240,6 +243,7 @@ let view model dispatch =
                   option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
                   option [ Value Service.AllCloze ] [ str "Get All Cloze" ]
                   option [ Value Service.TutorialDialogue ] [ str "Tutorial Dialogue" ]
+                  option [ Value Service.ElaboratedFeedback ] [ str "Elaborated Feedback" ]
                   option [ Value Service.DefinitionalFeedback ] [ str "Definitional Feedback" ]
                   option [ Value Service.InitializeDefinitionalFeedback ] [ str "Initialize Definitional Feedback" ]
                   option [ Value Service.InitializeSpellingCorrector ] [ str "Initialize Spelling Corrector" ]
@@ -267,6 +271,7 @@ let view model dispatch =
                         model.Service <> Service.NLP && 
                         model.Service <> Service.SelectCloze && 
                         model.Service <> Service.AllCloze && 
+                        model.Service <> Service.ElaboratedFeedback &&
                         model.Service <> Service.DefinitionalFeedback &&
                         model.Service <> Service.InitializeDefinitionalFeedback &&
                         model.Service <> Service.InitializeSpellingCorrector &&

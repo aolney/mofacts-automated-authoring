@@ -104,13 +104,14 @@ let getDeterminerPhraseFromTokens (tokens : string[]) =
         match determinerMap.TryFind( token0Lower ) with
         | Some(det) -> det
         | None -> 
-            //If it is a word we've never seen OR we've seen the plural; assume it takes "a"/"an"; TODO: better job of plurals, etc
+            //If it is a word we've never seen OR we've seen the plural (which implies a count noun); assume it takes "a"/"an"; TODO: better job of plurals, etc
             if not <| wordSet.Contains( token0Lower) || wordSet.Contains( token0Lower + "s" ) then
                 match token0Lower.Substring(0,1) with
                 | "a" | "e" | "i" | "o" | "u" -> "an"
                 | _ -> "a"
             else
-                ""
+                "" 
+
     //don't lowercase acronyms
     let correctCaseToken0 = if isAcronym(tokens.[0]) then tokens.[0] else token0Lower 
     //return the det, which may be empty, a lowercased first token, and the rest
@@ -174,5 +175,5 @@ let HarnessGenerateFeedback jsonFeedbackRequest =
 /// Very simplistic approach to turning non-sentential glossary entries into sentences
 let GetDefinitionFromGlossary( term : string) =
     match definitionMap.TryFind( term ) with
-    | Some(entry) -> getDeterminerPhrase( term ) + " " + getPredicate( entry ) |> Some
+    | Some(entry) -> (getDeterminerPhrase( term ) |> firstLetterUpper) + " " + getPredicate( entry ) +  "." |> Some
     | None -> None
