@@ -4,12 +4,13 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Paraphrase.fs" />
+    <Compile Include="LongformQA.fs" />
     <Compile Include="SpellingCorrector.fs" />
     <Compile Include="DefinitionalFeedback.fs" />
     <Compile Include="WordFrequency.fs" />
     <Compile Include="DependencyCollapser.fs" />
     <Compile Include="AllenNLP.fs" />
-    <Compile Include="LongformQA.fs" />
+    <Compile Include="ElaboratedFeedback.fs" />
     <Compile Include="Triples.fs" />
     <Compile Include="ClozeAPI.fs" />
     <Compile Include="LemmInflect.fs" />

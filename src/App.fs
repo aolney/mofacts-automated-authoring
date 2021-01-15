@@ -143,7 +143,7 @@ let update msg (model:Model) =
       // Note we pass no chunks; input is used as a singleton chunk instead
       | Triples -> makeCmd (Triples.GetTriples model.JsonInput None) model.InputText makeServiceResult  
       | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
-      | ElaboratedFeedback -> makeCmd (LongformQA.HarnessGetElaboratedFeedback) model.InputText makeServiceResult
+      | ElaboratedFeedback -> makeCmd (ElaboratedFeedback.HarnessGetElaboratedFeedback) model.InputText makeServiceResult
       | Lemma -> makeCmd LemmInflect.testGetLemma model.InputText makeServiceResult
       | Inflection -> makeCmd LemmInflect.testGetInflection model.InputText makeServiceResult
       | Paraphrase -> makeCmd Paraphrase.getParaphrases model.InputText makeServiceResult
@@ -173,7 +173,7 @@ let update msg (model:Model) =
       match service with
       // | TutorialDialogue -> TutorialDialogue.DialogueState.Initialize "" "" |> toJson
       | TutorialDialogue -> TutorialDialogue.DialogueState.InitializeTest() |> toJson
-      | ElaboratedFeedback -> LongformQA.HarnessElaboratedFeedbackRequest.InitializeTest() |> toJson
+      | ElaboratedFeedback -> ElaboratedFeedback.HarnessElaboratedFeedbackRequest.InitializeTest() |> toJson
       | _ -> ""
     ( {model with Service=service; Status=""; InputText = inputText}, [])
   | DownloadJson ->
