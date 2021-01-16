@@ -177,3 +177,13 @@ let GetDefinitionFromGlossary( term : string) =
     match definitionMap.TryFind( term ) with
     | Some(entry) -> (getDeterminerPhrase( term ) |> firstLetterUpper) + " " + getPredicate( entry ) +  "." |> Some
     | None -> None
+
+/// Find the term or successive words then do a Very simplistic approach to turning non-sentential glossary entries into sentences
+let GetDefinitionFromGlossaryHighRecall( term : string )=
+    //use the whole term then the first word of the term ; using  following words tends to create drift, e.g. digestive tract goes to tract (neuron)
+    // let candidateTerms = (Array.append [|term|] (term.Split( ' ' )) ) |> Array.filter( fun t -> definitionMap.ContainsKey( t ) )
+    let candidateTerms = [|term ; term.Split( ' ' ).[0] |] |> Array.filter( fun t -> definitionMap.ContainsKey( t ) )
+    if candidateTerms.Length > 0 then 
+        GetDefinitionFromGlossary candidateTerms.[0]
+    else
+        None

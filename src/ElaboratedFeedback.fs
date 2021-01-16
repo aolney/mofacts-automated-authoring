@@ -138,13 +138,16 @@ let getDefinitionProcess correctAnswer incorrectAnswer config =
     let tags = ResizeArray<Tag>()
 
     if config.UseDefinitions then
-        let incorrectDefinition = incorrectAnswer |> DefinitionalFeedback.GetDefinitionFromGlossary
-        let correctDefinition = correctAnswer |> DefinitionalFeedback.GetDefinitionFromGlossary
+        let incorrectDefinition = incorrectAnswer |> DefinitionalFeedback.GetDefinitionFromGlossaryHighRecall
+        let correctDefinition = correctAnswer |> DefinitionalFeedback.GetDefinitionFromGlossaryHighRecall
+        // let incorrectDefinition = incorrectAnswer |> DefinitionalFeedback.GetDefinitionFromGlossary
+        // let correctDefinition = correctAnswer |> DefinitionalFeedback.GetDefinitionFromGlossary
         //Note incorrect precedes correct: this should match the synthetic question word order
         let definitionContext = [| incorrectDefinition ; correctDefinition |] |> Array.choose id;
         tags.Add(DefinitionsUsed(definitionContext.Length))
         Some <| { CorrectAnswerDefinition = correctDefinition; IncorrectAnswerDefinition = incorrectDefinition; OutputContext= definitionContext },tags
     else
+        tags.Add(DefinitionsUsed(0))
         None,tags 
         
 
@@ -304,45 +307,85 @@ type HarnessElaboratedFeedbackRequest =
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API
 let HarnessGetElaboratedFeedback jsonRequest =
     let request = jsonRequest |> ofJson<HarnessElaboratedFeedbackRequest>
-    GetElaboratedFeedback request.IncorrectAnswer request.CorrectAnswer request.ClozeSentence
+    GetElaboratedFeedback request.IncorrectAnswer request.CorrectAnswer request.ClozeSentence None
 
+
+// ABLATION EXPERIEMENTS: CALLING FROM NODE WITH TIMEOUTS TO AVOID BLOWING UP CUDA
 [<StringEnum>]
-type BatchCondition = 
-    /// No definitions used, only terms in a synthetic question
-    | TermOnly
-/// Currently specific to /z/aolney/research_projects/mofacts/analysis/2020-01-13-error-analysis-for-content-generation/termConfusionCountNoQuotes.tsv
-let BatchElaboratedFeedback( multiLineTabDelimitedText : string ) ( condition : BatchCondition )=
-    promise {
+type AblationCondition = 
+    /// No cloze, no definitions, but everything else
+    | [<CompiledName("NoClozeNoDefinitions")>] NoClozeNoDefinitions
+    /// No cloze, but everything else
+    | [<CompiledName("NoCloze")>] NoCloze
+
+let ElaboratedFeedbackCondition( row : string)(condition : AblationCondition) =
+    let config = 
         match condition with
-        | TermOnly -> 
-            let config = Some <| { UseCloze = false; UseDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
-            let rows = multiLineTabDelimitedText.Split('\n') |> Array.skip 1
+        | NoClozeNoDefinitions -> Some <| { UseCloze = false; UseDefinitions = false; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | NoCloze -> Some <| { UseCloze = false; UseDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+  
+    let s = row.Split('\t')
+    GetElaboratedFeedback s.[0] s.[1] "" config
+       
+// ISSUES WITH THIS BLOWING UP CUDA WHEN CALLED FROM IJSKERNEL
+// [<Emit("async function doSleep() { await new Promise(res => setTimeout(res, $0)); }")>]
+// let emitSleep ( milliseconds : int) = jsNative
+// [<Emit("doSleep()")>]
+// let doSleep () = jsNative
+// /// Currently specific to /z/aolney/research_projects/mofacts/analysis/2020-01-13-error-analysis-for-content-generation/termConfusionCountNoQuotes.tsv
+// let BatchElaboratedFeedback( multiLineTabDelimitedText : string ) ( condition : BatchCondition )=
+//     promise {
+//         match condition with
+//         | TermOnly -> 
+//             let config = Some <| { UseCloze = false; UseDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+//             let rows = multiLineTabDelimitedText.Split('\n') |> Array.skip 1 |> Array.take 20 //DEBUG TAKE
 
-            let! results = 
-                rows 
-                |> Seq.map( fun r -> 
-                    let s = r.Split('\t')
-                    GetElaboratedFeedback s.[0] s.[1] "" config )
-                |> Promise.all
 
-            let whitespaceRegex = System.Text.RegularExpressions.Regex("\s+")
-            if allOK <| results  then
-                let newCols = 
-                    results
-                    |> resultsToType
-                    |> Array.map ( fun ef ->  
-                        let json = whitespaceRegex.Replace( toJson <| ef, " ")
-                        ef.ElaboratedFeedback + "|" + json)
+//             // let! r1 = 
+//             //     promise {
+//             //         let feedbacks = new ResizeArray<JS.Promise<Result<ElaboratedFeedback,FetchError>>>()
+//             //         for r in rows do
+//             //             let s = r.Split('\t')
+//             //             feedbacks.Add(GetElaboratedFeedback s.[0] s.[1] "" config)
+//             //             let timeout = 30
+//             //             printfn "sleeping for %A" timeout
+//             //             do! Promise.sleep (1000 * timeout) // pad sleep to avoid CUDA OOM
+//             //         return feedbacks |> Promise.all;
+//             //     } 
+//             // let! results = r1 
+            
+//             // This works, but I can't insert a sleep 
+//             let timeout = 30
+//             emitSleep(1000 * timeout) // pad sleep to avoid CUDA OOM
+                  
+//             let! results = 
+//                 rows 
+//                 |> Seq.map( fun r -> 
+//                     let s = r.Split('\t')
+//                     doSleep()
+//                     GetElaboratedFeedback s.[0] s.[1] "" config;
+//                     )
+//                 |> Promise.all
                 
-                let outputBody = 
-                    Array.zip rows newCols
-                    |> Array.map( fun (r,nc) -> r.Replace("\t","|") + "|" + nc)
-                    |> String.concat "\n"
 
-                let outputHeader = "term1|term2|count|def1|def2|feedback|json\n"
-                return Ok(outputHeader + outputBody)
+//             let whitespaceRegex = System.Text.RegularExpressions.Regex("\s+")
+//             if allOK <| results  then
+//                 let newCols = 
+//                     results
+//                     |> resultsToType
+//                     |> Array.map ( fun ef ->  
+//                         let json = whitespaceRegex.Replace( toJson <| ef, " ")
+//                         ef.ElaboratedFeedback + "|" + json)
+                
+//                 let outputBody = 
+//                     Array.zip rows newCols
+//                     |> Array.map( fun (r,nc) -> r.Replace("\t","|") + "|" + nc)
+//                     |> String.concat "\n"
 
-            else
-                let errorPayload = ( results |> resultsToError |> Array.map (sprintf " error: %A")  )
-                return Error(errorPayload |> String.concat "\n")
-    }
+//                 let outputHeader = "term1|term2|count|def1|def2|feedback|json\n"
+//                 return Ok(outputHeader + outputBody)
+
+//             else
+//                 let errorPayload = ( results |> resultsToError |> Array.map (sprintf " error: %A")  )
+//                 return Error(errorPayload |> String.concat "\n")
+//     }
