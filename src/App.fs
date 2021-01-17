@@ -51,6 +51,9 @@ type Service =
   | Paraphrase
   | ResolveTextReferents
   | AnswerQuestion
+  | Wikify
+  | WikiAlign
+  | WikiExtracts
   | InitializeDefinitionalFeedback
   | InitializeSpellingCorrector
   | InitializeParaphraseCache
@@ -149,6 +152,9 @@ let update msg (model:Model) =
       | Paraphrase -> makeCmd Paraphrase.getParaphrases model.InputText makeServiceResult
       | ResolveTextReferents -> makeCmd AllenNLP.ResolveTextReferents model.InputText makeServiceResult
       | AnswerQuestion -> makeCmd LongformQA.testAnswer model.InputText makeServiceResult
+      | Wikify -> makeCmd Wikifier.GetWikification model.InputText makeServiceResult
+      | WikiAlign -> makeCmd Wikifier.HarnessWikiAlign model.InputText makeServiceResult
+      | WikiExtracts -> makeCmd Wikifier.HarnessWikiExtracts model.InputText makeServiceResult
       | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
       | InitializeParaphraseCache -> makeCmd Paraphrase.InitializeParaphraseCache model.JsonInput.Value makeServiceResult
@@ -174,6 +180,7 @@ let update msg (model:Model) =
       // | TutorialDialogue -> TutorialDialogue.DialogueState.Initialize "" "" |> toJson
       | TutorialDialogue -> TutorialDialogue.DialogueState.InitializeTest() |> toJson
       | ElaboratedFeedback -> ElaboratedFeedback.HarnessElaboratedFeedbackRequest.InitializeTest() |> toJson
+      | WikiAlign | WikiExtracts -> Wikifier.HarnessWikifyAlignRequest.InitializeTest() |> toJson
       | _ -> ""
     ( {model with Service=service; Status=""; InputText = inputText}, [])
   | DownloadJson ->
@@ -255,6 +262,9 @@ let view model dispatch =
                   option [ Value Service.Paraphrase ] [ str "Paraphrase" ]
                   option [ Value Service.ResolveTextReferents ] [ str "Resolve Coreference" ]
                   option [ Value Service.AnswerQuestion ] [ str "Answer Question" ]
+                  option [ Value Service.Wikify ] [ str "Wikify" ]
+                  option [ Value Service.WikiAlign ] [ str "Wikify Align" ]
+                  option [ Value Service.WikiExtracts ] [ str "Wiki Extracts" ]
                   option [ Value Service.SRL ] [ str "SRL Parse" ]
                   option [ Value Service.DependencyParser ] [ str "Dependency Parse" ]
                   option [ Value Service.Coreference ] [ str "Coreference Annotation" ] 
