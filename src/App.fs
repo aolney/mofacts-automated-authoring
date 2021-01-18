@@ -180,6 +180,7 @@ let update msg (model:Model) =
       // | TutorialDialogue -> TutorialDialogue.DialogueState.Initialize "" "" |> toJson
       | TutorialDialogue -> TutorialDialogue.DialogueState.InitializeTest() |> toJson
       | ElaboratedFeedback -> ElaboratedFeedback.HarnessElaboratedFeedbackRequest.InitializeTest() |> toJson
+      | DefinitionalFeedback -> DefinitionalFeedback.HarnessFeedbackRequest.InitializeTest() |> toJson
       | WikiAlign | WikiExtracts -> Wikifier.HarnessWikifyAlignRequest.InitializeTest() |> toJson
       | _ -> ""
     ( {model with Service=service; Status=""; InputText = inputText}, [])

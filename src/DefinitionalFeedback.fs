@@ -144,12 +144,13 @@ let getPredicate entry =
     
     verb + " " + completion.Trim([|' ';'.'|])
 
-type FeedbackRequest =
+type HarnessFeedbackRequest =
     { 
         CorrectAnswer : string
         IncorrectAnswer : string
     }
-
+    static member InitializeTest() = {CorrectAnswer="ADH"; IncorrectAnswer ="acetylcholine"; }
+ 
 /// Generates simple definitional feedback given a json object representing a FeedbackRequest
 let GenerateFeedback incorrectAnswer correctAnswer =
     promise {
@@ -169,7 +170,7 @@ let GenerateFeedback incorrectAnswer correctAnswer =
 
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API
 let HarnessGenerateFeedback jsonFeedbackRequest =
-    let fr = jsonFeedbackRequest |> ofJson<FeedbackRequest>
+    let fr = jsonFeedbackRequest |> ofJson<HarnessFeedbackRequest>
     GenerateFeedback fr.IncorrectAnswer fr.CorrectAnswer
 
 /// Very simplistic approach to turning non-sentential glossary entries into sentences

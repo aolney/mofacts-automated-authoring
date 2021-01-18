@@ -4,11 +4,9 @@ open System
 open Fable.Core
 open Fable.Core.JsInterop
 open Thoth.Json 
-open LongformQA
 open Thoth.Fetch
-
-//for node compatibility
-// importSideEffects "isomorphic-fetch"
+open LongformQA
+open Wikifier
 
 //Fable 2 transition 
 let inline toJson x = Encode.Auto.toString(4, x)
@@ -21,6 +19,8 @@ let resultToErrorOption (r : Result<'t,'e> )  = match r with | Ok(r) -> None | E
 let allOK (resultsArr : Result<'t,'e>[] ) = resultsArr |> Array.forall( fun r -> match r with | Ok(r) -> true | Error(e) -> false )
 let resultsToType (resultsArr : Result<'t,'e>[] )  = resultsArr |> Array.choose( fun r -> match r with | Ok(r) -> Some(r) | Error(_) -> None ) 
 let resultsToError (resultsArr : Result<'t,'e>[] )  = resultsArr |> Array.choose( fun r -> match r with | Ok(r) -> None | Error(e) -> Some(e) ) 
+let PromisifyOk ( input:'t ) =
+    promise{ return Ok(input) }
 
 [<StringEnum>]
 type QuestionType =
@@ -55,7 +55,7 @@ type ElasticProcess =
         /// Documents retrieved from Elasticsearch AP book using the synthetic question
         ElasticDocuments : Document[]
         /// Index of ElasticDocuments that contain both IncorrectAnswer and CorrectAnswer
-        MatchingElasticDocuments : int[]
+        MatchingElasticDocumentIndices : int[]
         /// Output of this process to be used as query context
         OutputContext : string[]
     }
@@ -67,17 +67,38 @@ type CoreferenceProcess =
         /// Coref resolved candidate answer sentences
         CorefCandidateAnswerSentences : string[];
         /// Index of CorefCandidateAnswer sentences used
-        SelectedSentences : int[];
+        SelectedSentenceIndices : int[];
         /// Output of this process to be used as the answer
         OutputAnswer : string
     }
+/// The source of a definition
+[<StringEnum>]
+type DefinitionSource =
+    /// Book glossary, constructed per domain
+    | Glossary
+    /// Wikipedia, totally dynamic
+    | Wikipedia
+
+/// A definition with associated metadata
+type Definition =
+    {
+        /// The text of the definition
+        Text : string 
+        /// Source of the definition
+        Source : DefinitionSource
+    }
+    //Project the text of a Definition option as an option
+    static member TextOption ( def : Definition option) =  match def with | Some(d) -> Some <| d.Text | None -> None 
+
 /// Capture manipulations of definitions
 type DefinitionProcess = 
     {
         /// The definition we retrieved for the CorrectAnswer
-        CorrectAnswerDefinition : string option
+        CorrectAnswerDefinition : Definition option
         /// The definition we retrieved for the IncorrectAnswer
-        IncorrectAnswerDefinition : string option
+        IncorrectAnswerDefinition : Definition option
+        /// Wikipedia metadata associated with definitions from that source
+        WikiExtracts : WikiTermEntityExtracts option
         /// Output of this process to be used as query context
         OutputContext : string[]
     }
@@ -124,32 +145,114 @@ let lowContains ( a : string ) ( b : string ) =
 type Configuration =
     {
         UseCloze : bool;
-        UseDefinitions : bool;
+        /// Implies glossary by default
+        UseGlossaryDefinitions : bool;
+        /// Requires UseDefintions to be true
+        UseWikipediaDefinitionsForMissingGlossaryDefinitions : bool;
         ElasticDocsContainBothKeys : bool;
         MaxElasticDocs : int;
         UseAnswerCoreferenceFilter : bool;
         SyntheticQuestion : QuestionType;
     }
-    static member Default() = { UseCloze = true; UseDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+    static member Default() = { UseCloze = true; UseGlossaryDefinitions = true; UseWikipediaDefinitionsForMissingGlossaryDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+
+/// Given a term, find the associated definitions in WikiTermEntityExtracts
+let getWikiDefinition (wikiExtracts: WikiTermEntityExtracts) ( term : string ) =
+    let wtemOption =
+        wikiExtracts.WikiTermEntityMatches
+        |> Array.tryFind( fun wtem -> wtem.Term = term )
+    // get page ids of the first candidate for eacy entity (top ranked candidate)
+    let pageIdsOption =
+        match wtemOption with
+        | Some(wtem) -> 
+            wtem.EntityMatches 
+            // Rank order em by candidate probability so most probable gets most consideration
+            |> Array.map( fun em -> 
+                let max = em.Entity.candidates |> Array.maxBy( fun c -> c.score) 
+                max.score,max.wikiId 
+            )
+            |> Array.sortByDescending fst
+            |> Array.map snd
+            |> Array.distinct
+            |> Some
+            // OLD: assumes candidates are already sorted by descending, which isn't always true
+            // |> Array.sortByDescending( fun em -> em.Entity.candidates.[0].score)
+            // |> Array.map( fun em -> em.Entity.candidates.[0].wikiId) |> Some
+        | None -> None
+    // find definitions with associated pageIds, if they exist, avoiding duplicates
+    match pageIdsOption with
+    | Some(pageIds) ->
+        let definitions =  
+            [| for pageId in pageIds do
+                for page in wikiExtracts.Pages do
+                    if pageId = page.pageid then
+                        //simplistic - use first sentence marked by period
+                        yield page.extract.Split('.').[0]
+            |] |> String.concat ". "
+        if definitions.Length > 0 then 
+            Some <| { Text = definitions ; Source = Wikipedia }
+        else None
+    | None -> None
+    
+/// Get a glossary definition
+let getGlossaryDefinition (term:string) = 
+    match term |> DefinitionalFeedback.GetDefinitionFromGlossaryHighRecall with
+    | Some(d) -> Some <| { Text = d; Source = Glossary }
+    | None -> None
 
 /// Get definition process (definitions and aspects of construction)
-let getDefinitionProcess correctAnswer incorrectAnswer config =
-    //Log our progress using tags
-    let tags = ResizeArray<Tag>()
+let getDefinitionProcess correctAnswer incorrectAnswer text config =
+    // promise {
+        //Log our progress using tags
+        let tags = ResizeArray<Tag>()
 
-    if config.UseDefinitions then
-        let incorrectDefinition = incorrectAnswer |> DefinitionalFeedback.GetDefinitionFromGlossaryHighRecall
-        let correctDefinition = correctAnswer |> DefinitionalFeedback.GetDefinitionFromGlossaryHighRecall
-        // let incorrectDefinition = incorrectAnswer |> DefinitionalFeedback.GetDefinitionFromGlossary
-        // let correctDefinition = correctAnswer |> DefinitionalFeedback.GetDefinitionFromGlossary
-        //Note incorrect precedes correct: this should match the synthetic question word order
-        let definitionContext = [| incorrectDefinition ; correctDefinition |] |> Array.choose id;
-        tags.Add(DefinitionsUsed(definitionContext.Length))
-        Some <| { CorrectAnswerDefinition = correctDefinition; IncorrectAnswerDefinition = incorrectDefinition; OutputContext= definitionContext },tags
-    else
-        tags.Add(DefinitionsUsed(0))
-        None,tags 
-        
+        // We have multiple options for definitions. 
+        // We prefer the glossary entry if it exists
+        // An alternative is Wikipedia 
+        if config.UseGlossaryDefinitions then
+            let glossaryIncorrectDefinitionOption = incorrectAnswer |> getGlossaryDefinition
+            let glossaryCorrectDefinitionOption = correctAnswer |> getGlossaryDefinition
+            //if we fail to get glossary definitions, query wikipedia
+            if config.UseWikipediaDefinitionsForMissingGlossaryDefinitions && (glossaryIncorrectDefinitionOption.IsNone || glossaryCorrectDefinitionOption.IsNone) then
+                promise {
+                    // Try to get definitions for the terms we are missing from Wikipedia
+                    // Because only the correct answer is in the text for certain, we create a synthetic text where we've replaced the correct answer with the correct answer
+                    let syntheticText = text + " " + text.Replace( correctAnswer, incorrectAnswer)
+                    let! wikiResult = GetWikiExtractsForTerms syntheticText [| incorrectAnswer ; correctAnswer |] 
+                    match wikiResult with
+                    | Ok( wikiExtracts ) -> 
+                        let wikiIncorrectDefinitionOption = getWikiDefinition wikiExtracts incorrectAnswer
+                        let wikiCorrectDefinitionOption = getWikiDefinition wikiExtracts correctAnswer
+                        // Use the glossary definition, backing off to the wiki definition
+                        let finalIncorrectDefinition = 
+                            match glossaryIncorrectDefinitionOption, wikiIncorrectDefinitionOption with
+                            | Some(_), _ -> glossaryIncorrectDefinitionOption
+                            | None, Some(_) -> wikiIncorrectDefinitionOption
+                            | None, None -> None
+                        let finalCorrectDefinition = 
+                            match glossaryCorrectDefinitionOption, wikiCorrectDefinitionOption with
+                            | Some(_), _ -> glossaryCorrectDefinitionOption
+                            | None, Some(_) -> wikiCorrectDefinitionOption
+                            | None, None -> None
+
+
+                        let definitionContext = [| finalIncorrectDefinition; finalCorrectDefinition |] |> Array.choose Definition.TextOption
+                        tags.Add(DefinitionsUsed(definitionContext.Length))
+
+                        let dp = { CorrectAnswerDefinition = finalCorrectDefinition; IncorrectAnswerDefinition = finalIncorrectDefinition; WikiExtracts = Some <| wikiExtracts; OutputContext = definitionContext }
+                        return Ok( Some <| dp, tags)
+                    | Error(e) -> return Error(e)
+                }
+            else
+                //Note incorrect precedes correct: this should match the synthetic question word order
+                let definitionContext = [| glossaryIncorrectDefinitionOption ; glossaryCorrectDefinitionOption |] |> Array.choose Definition.TextOption
+                tags.Add(DefinitionsUsed(definitionContext.Length))
+                let dp = { CorrectAnswerDefinition = glossaryCorrectDefinitionOption; IncorrectAnswerDefinition = glossaryIncorrectDefinitionOption; WikiExtracts = None; OutputContext = definitionContext }      
+                PromisifyOk ( Some <| dp ,tags)
+        else
+            tags.Add(DefinitionsUsed(0))
+            PromisifyOk ( None,tags )
+    // }
 
 /// Get Elastic process (documents and aspects of construction)
 let getElasticProcess (docs : Document[]) correctAnswer incorrectAnswer config =
@@ -178,7 +281,7 @@ let getElasticProcess (docs : Document[]) correctAnswer incorrectAnswer config =
     let finalElasticDocs = filteredDocuments |> Array.map( fun (_,d) -> d.Text) |> tryTake elasticDocLimit
     tags.Add(ElasticDocumentsUsed(finalElasticDocs.Length))
 
-    { ElasticDocuments = docs; MatchingElasticDocuments = retainedDocIndices; OutputContext = finalElasticDocs},tags
+    { ElasticDocuments = docs; MatchingElasticDocumentIndices = retainedDocIndices; OutputContext = finalElasticDocs},tags
 
 /// Get coreference process (coref filtered answer and aspects of construction)
 let getCoreferenceProcess answer correctAnswer incorrectAnswer config = 
@@ -205,7 +308,7 @@ let getCoreferenceProcess answer correctAnswer incorrectAnswer config =
                 tags.Add(CoreferenceFilteredSentences(true))
                 let finalAnswer = answerSentences |> String.concat " "
                 
-                return Ok(  Some <| {CandidateAnswerSentences = candidateSentences; CorefCandidateAnswerSentences = corefSentences; SelectedSentences=retainedSentenceIndices; OutputAnswer=finalAnswer}, tags ) 
+                return Ok(  Some <| {CandidateAnswerSentences = candidateSentences; CorefCandidateAnswerSentences = corefSentences; SelectedSentenceIndices=retainedSentenceIndices; OutputAnswer=finalAnswer}, tags ) 
             // Error on resolving coreference
             | Error(e) -> 
                 return Error( FetchError.DecodingFailed(e) ) //HACK: must be a fetch error to match type, so we choose a FetchError that wraps string
@@ -225,72 +328,78 @@ let GetElaboratedFeedback( incorrectAnswer : string ) (correctAnswer : string) (
         let tags = ResizeArray<Tag>()
 
         //Get definitions
-        let definitionProcess,dpTags = getDefinitionProcess correctAnswer incorrectAnswer config
-        tags.AddRange(dpTags)
-        
-        //Create synthetic question
-        let question = 
-            match config.SyntheticQuestion with
-            | RelationshipQuestion -> "What is the relationship between the " + incorrectAnswer + " and the " + correctAnswer + "?"
-            | DifferenceQuestion -> "What is the difference between the " + incorrectAnswer + " and the " + correctAnswer + "?"
-        tags.Add( SyntheticQuestion( config.SyntheticQuestion ))
-
-        //Get elastic docs; see tutorial dialogue for example of handling promises if things get more complicated
-        let! documents = question |> getDocuments
-        match documents with
-        | Ok(docs) ->
-
-            // Process elastic docs
-            let elasticProcess, epTags = getElasticProcess docs correctAnswer incorrectAnswer config
-            tags.AddRange(epTags)
+        let! dpResult = getDefinitionProcess correctAnswer incorrectAnswer clozeSentence config
+        match dpResult with
+        | Ok(definitionProcess,dpTags) -> 
+            tags.AddRange(dpTags)
+                
             
-            //Construct full custom context for query
-            let definitionContext = 
-                match definitionProcess with
-                | Some(dp) -> dp.OutputContext
-                | None -> [||]
-            let clozeContext = 
-                if config.UseCloze then  
-                    tags.Add(ClozeUsed(true))
-                    [| clozeSentence |] 
-                else Array.empty
-            let context = Array.concat [ definitionContext; clozeContext; elasticProcess.OutputContext ]               
-            
-            // Process query and results
-            let! answer = getAnswerWithContext question context
-            match answer with
-            | Ok(ans) -> 
-                let! cpResult = getCoreferenceProcess ans.answer correctAnswer incorrectAnswer config
-                match cpResult with
-                | Ok(coreferenceProcess,cpTags) -> 
-                    tags.AddRange(cpTags)
+            //Create synthetic question
+            let question = 
+                match config.SyntheticQuestion with
+                | RelationshipQuestion -> "What is the relationship between the " + incorrectAnswer + " and the " + correctAnswer + "?"
+                | DifferenceQuestion -> "What is the difference between the " + incorrectAnswer + " and the " + correctAnswer + "?"
+            tags.Add( SyntheticQuestion( config.SyntheticQuestion ))
 
-                    let finalAnswer =
-                        match coreferenceProcess with 
-                        | Some(cp) -> cp.OutputAnswer
-                        | None -> ans.answer
+            //Get elastic docs; see tutorial dialogue for example of handling promises if things get more complicated
+            let! documents = question |> getDocuments
+            match documents with
+            | Ok(docs) ->
 
-                    let elaboratedFeedback = 
-                        {
-                            ElaboratedFeedback = finalAnswer;
-                            IncorrectAnswer = incorrectAnswer;
-                            CorrectAnswer = correctAnswer;
-                            ClozeSentence = if config.UseCloze then Some <| clozeSentence else None;
-                            ElasticProcess = elasticProcess;
-                            DefinitionProcess = definitionProcess;
-                            ContextDocuments = context;
-                            CoreferenceProcess = coreferenceProcess;                           
-                            SyntheticQuestion = question;
-                            Tags = tags.ToArray()
-                        }
-                    return Ok( elaboratedFeedback ) 
-                // Error on resolving coreference
+                // Process elastic docs
+                let elasticProcess, epTags = getElasticProcess docs correctAnswer incorrectAnswer config
+                tags.AddRange(epTags)
+                
+                //Construct full custom context for query
+                let definitionContext = 
+                    match definitionProcess with
+                    | Some(dp) -> dp.OutputContext
+                    | None -> [||]
+                let clozeContext = 
+                    if config.UseCloze then  
+                        tags.Add(ClozeUsed(true))
+                        [| clozeSentence |] 
+                    else Array.empty
+                let context = Array.concat [ definitionContext; clozeContext; elasticProcess.OutputContext ]               
+                
+                // Process query and results
+                let! answer = getAnswerWithContext question context
+                match answer with
+                | Ok(ans) -> 
+                    let! cpResult = getCoreferenceProcess ans.answer correctAnswer incorrectAnswer config
+                    match cpResult with
+                    | Ok(coreferenceProcess,cpTags) -> 
+                        tags.AddRange(cpTags)
+
+                        let finalAnswer =
+                            match coreferenceProcess with 
+                            | Some(cp) -> cp.OutputAnswer
+                            | None -> ans.answer
+
+                        let elaboratedFeedback = 
+                            {
+                                ElaboratedFeedback = finalAnswer;
+                                IncorrectAnswer = incorrectAnswer;
+                                CorrectAnswer = correctAnswer;
+                                ClozeSentence = if config.UseCloze then Some <| clozeSentence else None;
+                                ElasticProcess = elasticProcess;
+                                DefinitionProcess = definitionProcess;
+                                ContextDocuments = context;
+                                CoreferenceProcess = coreferenceProcess;                           
+                                SyntheticQuestion = question;
+                                Tags = tags.ToArray()
+                            }
+                        return Ok( elaboratedFeedback ) 
+                    // Error on resolving coreference
+                    | Error(e) -> 
+                       return Error(e)            
+                // Error on getting answer from longform qa
                 | Error(e) -> 
-                   return Error(e)            
-            // Error on getting answer from longform qa
+                    return Error(e)
+            // Error on getting docs from elasticsearch
             | Error(e) -> 
                 return Error(e)
-        // Error on getting docs from elasticsearch
+        // Error on getting definitions
         | Error(e) -> 
             return Error(e)
     }
@@ -302,12 +411,16 @@ type HarnessElaboratedFeedbackRequest =
         IncorrectAnswer : string
         ClozeSentence : string
     }
-    static member InitializeTest() = {CorrectAnswer="cerebellum"; IncorrectAnswer ="cerebrum"; ClozeSentence="Small amounts enter the central canal of the spinal cord, but most CSF circulates through the subarachnoid space of both the brain and the spinal cord by passing through openings in the wall of the fourth ventricle near the cerebellum ."}
-    
+    // static member InitializeTest() = {CorrectAnswer="cerebellum"; IncorrectAnswer ="cerebrum"; ClozeSentence="Small amounts enter the central canal of the spinal cord, but most CSF circulates through the subarachnoid space of both the brain and the spinal cord by passing through openings in the wall of the fourth ventricle near the cerebellum ."}
+    static member InitializeTest() = {CorrectAnswer="digestive tract"; IncorrectAnswer ="digestive system"; ClozeSentence="Other organs that produce hormones include the pineal gland; the thymus; reproductive organs; and certain cells of the digestive tract, the heart, and the kidneys."}
+
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API
 let HarnessGetElaboratedFeedback jsonRequest =
     let request = jsonRequest |> ofJson<HarnessElaboratedFeedbackRequest>
-    GetElaboratedFeedback request.IncorrectAnswer request.CorrectAnswer request.ClozeSentence None
+    let config = 
+        None
+        //Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+    GetElaboratedFeedback request.IncorrectAnswer request.CorrectAnswer request.ClozeSentence config 
 
 
 // ABLATION EXPERIEMENTS: CALLING FROM NODE WITH TIMEOUTS TO AVOID BLOWING UP CUDA
@@ -315,14 +428,17 @@ let HarnessGetElaboratedFeedback jsonRequest =
 type AblationCondition = 
     /// No cloze, no definitions, but everything else
     | [<CompiledName("NoClozeNoDefinitions")>] NoClozeNoDefinitions
-    /// No cloze, but everything else
-    | [<CompiledName("NoCloze")>] NoCloze
+    /// No cloze, but glossary definitions and everything else
+    | [<CompiledName("NoClozeGlossaryDefinitions")>] NoClozeGlossaryDefinitions
+    /// No cloze, but glossary definitions, wikipedia definitions, and everything else
+    | [<CompiledName("NoClozeWikipediaDefinitions")>] NoClozeWikipediaDefinitions
 
 let ElaboratedFeedbackCondition( row : string)(condition : AblationCondition) =
     let config = 
         match condition with
-        | NoClozeNoDefinitions -> Some <| { UseCloze = false; UseDefinitions = false; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
-        | NoCloze -> Some <| { UseCloze = false; UseDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | NoClozeNoDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = false; UseWikipediaDefinitionsForMissingGlossaryDefinitions = false; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | NoClozeGlossaryDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | NoClozeWikipediaDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
   
     let s = row.Split('\t')
     GetElaboratedFeedback s.[0] s.[1] "" config

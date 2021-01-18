@@ -19,9 +19,9 @@ let resultsToError (resultsArr : Result<'t,'e>[] )  = resultsArr |> Array.choose
 let inline toJson x = Encode.Auto.toString(4, x)
 let inline ofJson<'T> json = Decode.Auto.unsafeFromString<'T>(json)
 
-type HappyError =
-    | Fetch of FetchError
-    | Other of string
+// type HappyError =
+//     | Fetch of FetchError
+//     | Other of string
 
 type Candidate =
     {
@@ -168,7 +168,8 @@ let GetWikiExtractsForTerms( text : string) ( terms : string[]) =
                     wtem.EntityMatches
                     |> Seq.map( fun em ->
                         //candidates are sorted so best match is first
-                        em.Entity.candidates.[0].wikiId 
+                        let max = em.Entity.candidates |> Array.maxBy( fun c -> c.score) 
+                        max.wikiId 
                     )
                     // Be nice to WP and avoid duplicates
                     |> Seq.distinct
@@ -179,14 +180,20 @@ let GetWikiExtractsForTerms( text : string) ( terms : string[]) =
                 let pages = 
                     extractResults 
                     |> resultsToType
-                    |> Array.map( fun wer -> 
-                       (Map.toList wer.query.pages) |> List.map snd |> List.head ) //NOTE: only taking first page!
+                    |> Array.collect( fun wer -> wer.query.pages |> Map.toArray |> Array.map snd)
+                    // Remove duplicates, i.e. if similar page queries returned overlapping sets of pages
+                    |> Array.distinctBy( fun p -> p.pageid)
+                    // |> Array.map( fun wer -> 
+                    //    (Map.toList wer.query.pages) |> List.map snd |> List.head ) //NOTE: only taking first page!
                 return Ok( { WikiTermEntityMatches = wtems; Pages = pages } )
             else 
-                let errorPayload = (extractResults |> resultsToError |> Array.map (sprintf "wikipedia extract query error: %A") |> Array.distinct )
-                return Error(errorPayload |> String.concat "\n" |> HappyError.Other ) 
+                //We have a choice here to extend Fetch to report set of errors at once OR we can stay within Fetch and report the first such error
+                //We choose the later on the suspicion that all errors in this batch will be of the same type
+                // let errorPayload = (extractResults |> resultsToError |> Array.map (sprintf "wikipedia extract query error: %A") |> Array.distinct )
+                // return Error(errorPayload |> String.concat "\n" |> HappyError.Other ) 
+                return Error( extractResults |> resultsToError |> Array.head )
     
-        | Error(e) -> return Error( HappyError.Fetch(e) )
+        | Error(e) -> return Error( e ) //HappyError.Fetch(e) )
     }
 
 /// This function should only be called by the test harness GUI. It wraps GetWikiExtractsForTerms to match the test harness API
