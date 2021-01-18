@@ -6,7 +6,7 @@
     "start": "webpack-dev-server",
     "publish": "gh-pages -d deploy",
     "deploy": "webpack -p",
-    "node-build": "fable-splitter src -o node-build --commonjs",
+    "node-build": "fable-splitter src -o node-build --commonjs -c splitter.config.js",
     "pretest": "fable-splitter tests -o test-build --commonjs",
     "test": "mocha test-build -r jsdom-global/register -t 10000  --require tests/test-setup.js"
   },

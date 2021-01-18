@@ -67,8 +67,9 @@ let Initialize jsonDictionary =
             |> Seq.collect( fun (k,v) -> Seq.zip (v.gloss |> Array.map lower) v.glossTag )
             |> Seq.pairwise
             |> Seq.choose( fun ( (w1,t1),(w2,t2) ) ->
+                let w1Lower = w1.ToLower()
                 match t1,entryFirstWordSet.Contains(w2) with
-                | "DT", true -> Some(w2,w1) //entry first word and determiner
+                | "DT", true when w1Lower = "a" || w1Lower = "an" || w1Lower = "the" -> Some(w2,w1) //entry first word and determiner
                 | _ -> None
             )
             |> Seq.groupBy fst

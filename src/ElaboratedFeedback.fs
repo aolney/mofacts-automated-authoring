@@ -430,18 +430,18 @@ type AblationCondition =
     | [<CompiledName("NoClozeNoDefinitions")>] NoClozeNoDefinitions
     /// No cloze, but glossary definitions and everything else
     | [<CompiledName("NoClozeGlossaryDefinitions")>] NoClozeGlossaryDefinitions
-    /// No cloze, but glossary definitions, wikipedia definitions, and everything else
-    | [<CompiledName("NoClozeWikipediaDefinitions")>] NoClozeWikipediaDefinitions
+    /// The full system!
+    | [<CompiledName("Full011720")>] Full011720
 
 let ElaboratedFeedbackCondition( row : string)(condition : AblationCondition) =
     let config = 
         match condition with
         | NoClozeNoDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = false; UseWikipediaDefinitionsForMissingGlossaryDefinitions = false; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
         | NoClozeGlossaryDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
-        | NoClozeWikipediaDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Full011720 -> Some <| { UseCloze = true; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
   
     let s = row.Split('\t')
-    GetElaboratedFeedback s.[0] s.[1] "" config
+    GetElaboratedFeedback s.[0] s.[1] s.[2] config
        
 // ISSUES WITH THIS BLOWING UP CUDA WHEN CALLED FROM IJSKERNEL
 // [<Emit("async function doSleep() { await new Promise(res => setTimeout(res, $0)); }")>]

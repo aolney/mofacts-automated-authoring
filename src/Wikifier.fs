@@ -64,7 +64,11 @@ type WikificationRequest = { text : string }
 /// Get a wikification for the input text
 let GetWikification(text: string): JS.Promise<Result<Wikification,FetchError>> =
     promise {
-        return! Fetch.tryPost( endpoint + "wikify", { text=text;  } ) //caseStrategy = SnakeCase) //capitalization on the document fields seems to blow up the case strategy
+        //Disallow short/empty input (illinois wikifier restriction)
+        if text.Trim().Length < 5 then
+            return Ok( { inputText = text; entities = Array.empty})
+        else
+            return! Fetch.tryPost( endpoint + "wikify", { text=text;  } ) //caseStrategy = SnakeCase) //capitalization on the document fields seems to blow up the case strategy
     }
 
 /// The target is A and the query is B, so we score the overlap with respect to A
