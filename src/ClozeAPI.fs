@@ -349,7 +349,7 @@ let GetClozables ( da : DocumentAnnotation ) =
             tags.Add( sa |>  GetTotalWeight da.coreference |> Tag.SentenceWeight )
             tags.Add( clozable.[i].prob |> Tag.ClozeProbability )
             tags.Add( corefresolvedSentences.[ sa.id ] |> Tag.ClozeCorefTransformation)
-            tags.Add( sa.sen |> Paraphrase.getParaphrase |> Tag.ClozeParaphraseTransformation )
+            tags.Add( sa.sen |> Paraphrase.getCachedParaphrase |> Tag.ClozeParaphraseTransformation )
             //update clozable record
             clozable.[i] <- { clozable.[i] with tags = tags |> Seq.toList }
 
@@ -457,6 +457,75 @@ let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( stringArrayJs
             return Error(e)
     }
     
+
+let GetAllClozeLukeFormat20201218 (nlpJsonOption: string option) ( stringArrayJsonOption : string option) ( inputText : string )=
+    promise {
+        //Get a DocumentAnnotation if one wasn't passed in
+        let! nlpResult = 
+            match nlpJsonOption with
+            | Some(nlpJson) -> nlpJson |> ofJson<DocumentAnnotation> |> Promisify 
+            | None -> GetNLP stringArrayJsonOption inputText 
+
+        match nlpResult with
+        //sentence,cloze,sentenceWeight,clozeProbability
+        | Ok(da) ->
+            let clozables = da |> GetClozables |> Array.map( fun ra -> ra.ToArray() )
+            // return Ok( {sentences = da.sentences; coreference = da.coreference; clozables = clozables} )
+            let output = 
+                da.sentences
+                |> Array.mapi( fun i sa ->
+                    let totalWeight = sa |>  GetTotalWeight da.coreference
+                    clozables.[i]
+                    |> Array.map( fun cl -> 
+                        let cloze = cl.words |> String.concat " "
+                        let sentence = sa.sen |> AllenNLP.removePrePunctuationSpaces
+                        //map coreferents
+                        let crOption = cl.tags |> List.choose( function | Tag.ClozeCorefTransformation sen -> Some(sen) | _ ->  None ) |> List.tryHead
+                        match crOption with
+                        | Some(cr) ->
+                            //attempt to make coref resolve variant of item; will be identical to cr if clozeAnswer isn't found
+                            //NOTE: we must handle resolution in clozeAnswer as well
+                            //map of diffs: original cloze -> coref replacement cloze
+                            let diffList = diff.diffWords( sa.sen, cr, {| ignoreCase = true |} )
+                            let diffMap = 
+                                [| 
+                                    let removeList = ResizeArray<string>()
+                                    let addList = ResizeArray<string>()
+                                    for d in diffList do
+                                        if d.removed.IsSome then 
+                                            removeList.Add( d.value )
+                                        elif d.added.IsSome then
+                                            addList.Add( d.value )
+                                        elif d.value.Trim() = "" then
+                                            () //continue to accumulate over whitespace
+                                        else
+                                            if removeList.Count > 0 then
+                                                yield removeList |> String.concat " ", (addList |> String.concat " ").Trim()
+                                                removeList.Clear(); addList.Clear();
+                                |]
+                                |> Map.ofArray
+                            //correct response
+                            let crCloze =
+                                match diffMap.TryFind cloze with
+                                | Some(diffCloze) -> diffCloze
+                                | None -> cloze
+
+                            if sentence <> cr then
+                                {|Sentence=cr; Cloze=crCloze ; itemId = hash sa; clozeId = hash cloze; OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
+                            else
+                                {|Sentence=sentence; Cloze=cl.words |> String.concat " "; itemId = hash sa; clozeId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
+                                
+                        //no coref resolution
+                        | _ -> 
+                            {|Sentence=sentence; Cloze=cl.words |> String.concat " "; itemId = hash sa; clozeId = hash cloze; OriginalSentence=sentence; Tags=cl.tags @ cl.trace |} 
+                    )
+                )
+            
+            return Ok( output )
+        | Error(e) -> 
+            return Error(e)
+    }
+
 //TODO: since we are not allowing truly long fill ins (~4 words long) prefering longer once here 
 //may be causing us to throw items away. To prevent that, the length restriction need to be here as well
 /// Remove overlapping cloze, preferring larger spans

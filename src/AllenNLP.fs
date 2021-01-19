@@ -565,3 +565,17 @@ let resolveReferents ( da : DocumentAnnotation ) =
         )
     //
     resolvedSentences
+
+/// All in one that parses text and resolves reference
+let ResolveTextReferents ( inputText : string ) =
+    promise {
+        //Get a DocumentAnnotation if one wasn't passed in
+        let! nlpResult = GetNLP None inputText 
+
+        match nlpResult with
+        | Ok(da) ->
+            let resolvedSentences = da |> resolveReferents
+            return Ok( {|resolvedSentences = resolvedSentences; documentAnnotation = da|} ) //NOTE: anonymous type
+        | Error(e) -> 
+            return Error(e)
+    }

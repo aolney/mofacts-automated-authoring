@@ -67,8 +67,9 @@ let Initialize jsonDictionary =
             |> Seq.collect( fun (k,v) -> Seq.zip (v.gloss |> Array.map lower) v.glossTag )
             |> Seq.pairwise
             |> Seq.choose( fun ( (w1,t1),(w2,t2) ) ->
+                let w1Lower = w1.ToLower()
                 match t1,entryFirstWordSet.Contains(w2) with
-                | "DT", true -> Some(w2,w1) //entry first word and determiner
+                | "DT", true when w1Lower = "a" || w1Lower = "an" || w1Lower = "the" -> Some(w2,w1) //entry first word and determiner
                 | _ -> None
             )
             |> Seq.groupBy fst
@@ -104,13 +105,14 @@ let getDeterminerPhraseFromTokens (tokens : string[]) =
         match determinerMap.TryFind( token0Lower ) with
         | Some(det) -> det
         | None -> 
-            //If it is a word we've never seen OR we've seen the plural; assume it takes "a"/"an"; TODO: better job of plurals, etc
+            //If it is a word we've never seen OR we've seen the plural (which implies a count noun); assume it takes "a"/"an"; TODO: better job of plurals, etc
             if not <| wordSet.Contains( token0Lower) || wordSet.Contains( token0Lower + "s" ) then
                 match token0Lower.Substring(0,1) with
                 | "a" | "e" | "i" | "o" | "u" -> "an"
                 | _ -> "a"
             else
-                ""
+                "" 
+
     //don't lowercase acronyms
     let correctCaseToken0 = if isAcronym(tokens.[0]) then tokens.[0] else token0Lower 
     //return the det, which may be empty, a lowercased first token, and the rest
@@ -143,12 +145,13 @@ let getPredicate entry =
     
     verb + " " + completion.Trim([|' ';'.'|])
 
-type FeedbackRequest =
+type HarnessFeedbackRequest =
     { 
         CorrectAnswer : string
         IncorrectAnswer : string
     }
-
+    static member InitializeTest() = {CorrectAnswer="ADH"; IncorrectAnswer ="acetylcholine"; }
+ 
 /// Generates simple definitional feedback given a json object representing a FeedbackRequest
 let GenerateFeedback incorrectAnswer correctAnswer =
     promise {
@@ -168,5 +171,21 @@ let GenerateFeedback incorrectAnswer correctAnswer =
 
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API
 let HarnessGenerateFeedback jsonFeedbackRequest =
-    let fr = jsonFeedbackRequest |> ofJson<FeedbackRequest>
+    let fr = jsonFeedbackRequest |> ofJson<HarnessFeedbackRequest>
     GenerateFeedback fr.IncorrectAnswer fr.CorrectAnswer
+
+/// Very simplistic approach to turning non-sentential glossary entries into sentences
+let GetDefinitionFromGlossary( term : string) =
+    match definitionMap.TryFind( term ) with
+    | Some(entry) -> (getDeterminerPhrase( term ) |> firstLetterUpper) + " " + getPredicate( entry ) +  "." |> Some
+    | None -> None
+
+/// Find the term or successive words then do a Very simplistic approach to turning non-sentential glossary entries into sentences
+let GetDefinitionFromGlossaryHighRecall( term : string )=
+    //use the whole term then the first word of the term ; using  following words tends to create drift, e.g. digestive tract goes to tract (neuron)
+    // let candidateTerms = (Array.append [|term|] (term.Split( ' ' )) ) |> Array.filter( fun t -> definitionMap.ContainsKey( t ) )
+    let candidateTerms = [|term ; term.Split( ' ' ).[0] |] |> Array.filter( fun t -> definitionMap.ContainsKey( t ) )
+    if candidateTerms.Length > 0 then 
+        GetDefinitionFromGlossary candidateTerms.[0]
+    else
+        None
