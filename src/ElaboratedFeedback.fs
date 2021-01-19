@@ -167,9 +167,12 @@ let getWikiDefinition (wikiExtracts: WikiTermEntityExtracts) ( term : string ) =
         | Some(wtem) -> 
             wtem.EntityMatches 
             // Rank order em by candidate probability so most probable gets most consideration
-            |> Array.map( fun em -> 
-                let max = em.Entity.candidates |> Array.maxBy( fun c -> c.score) 
-                max.score,max.wikiId 
+            |> Array.choose( fun em -> 
+                if em.Entity.candidates <> null && em.Entity.candidates.Length > 0 then
+                    let max = em.Entity.candidates |> Array.maxBy( fun c -> c.score) 
+                    Some <| (max.score,max.wikiId )
+                else
+                    None
             )
             |> Array.sortByDescending fst
             |> Array.map snd
@@ -185,9 +188,9 @@ let getWikiDefinition (wikiExtracts: WikiTermEntityExtracts) ( term : string ) =
         let definitions =  
             [| for pageId in pageIds do
                 for page in wikiExtracts.Pages do
-                    if pageId = page.pageid then
+                    if pageId = page.pageid && page.extract.IsSome then
                         //simplistic - use first sentence marked by period
-                        yield page.extract.Split('.').[0]
+                        yield page.extract.Value.Split('.').[0]
             |] |> String.concat ". "
         if definitions.Length > 0 then 
             Some <| { Text = definitions ; Source = Wikipedia }

@@ -142,7 +142,7 @@ let HarnessWikiAlign jsonRequest =
     GetWikiEntitiesForTerms request.Text request.Terms
 
 type FromTo = { from : string ; ``to`` : string  }
-type Page = { pageid : int; ns : int; title : string; extract : string }
+type Page = { pageid : int; ns : int option; title : string option; extract : string option; missing : string option }
 type WikipediaQuery = { normalized : FromTo[] option; redirects : FromTo[] option; pages : Map<string,Page> }
 type WikipediaExtractResult = { batchcomplete : string ; query : WikipediaQuery }
 
@@ -170,10 +170,13 @@ let GetWikiExtractsForTerms( text : string) ( terms : string[]) =
                 wtems
                 |> Seq.collect( fun wtem -> 
                     wtem.EntityMatches
-                    |> Seq.map( fun em ->
-                        //candidates are sorted so best match is first
-                        let max = em.Entity.candidates |> Array.maxBy( fun c -> c.score) 
-                        max.wikiId 
+                    |> Seq.choose( fun em ->
+                        if em.Entity.candidates <> null && em.Entity.candidates.Length > 0 then
+                            //candidates are sorted so best match is first
+                            let max = em.Entity.candidates |> Array.maxBy( fun c -> c.score) 
+                            Some <| max.wikiId 
+                        else
+                            None
                     )
                     // Be nice to WP and avoid duplicates
                     |> Seq.distinct

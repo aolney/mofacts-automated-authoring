@@ -47,6 +47,7 @@ type Service =
   | Lemma //assumes UPOS noun
   | Inflection //assumes Penn NNS
   | ElaboratedFeedback
+  | CachedElaboratedFeedback
   | DefinitionalFeedback
   | Paraphrase
   | ResolveTextReferents
@@ -54,6 +55,7 @@ type Service =
   | Wikify
   | WikiAlign
   | WikiExtracts
+  | InitializeCachedElaboratedFeedback
   | InitializeDefinitionalFeedback
   | InitializeSpellingCorrector
   | InitializeParaphraseCache
@@ -147,6 +149,7 @@ let update msg (model:Model) =
       | Triples -> makeCmd (Triples.GetTriples model.JsonInput None) model.InputText makeServiceResult  
       | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
       | ElaboratedFeedback -> makeCmd (ElaboratedFeedback.HarnessGetElaboratedFeedback) model.InputText makeServiceResult
+      | CachedElaboratedFeedback -> makeCmd (CachedElaboratedFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
       | Lemma -> makeCmd LemmInflect.testGetLemma model.InputText makeServiceResult
       | Inflection -> makeCmd LemmInflect.testGetInflection model.InputText makeServiceResult
       | Paraphrase -> makeCmd Paraphrase.getParaphrases model.InputText makeServiceResult
@@ -155,6 +158,7 @@ let update msg (model:Model) =
       | Wikify -> makeCmd Wikifier.GetWikification model.InputText makeServiceResult
       | WikiAlign -> makeCmd Wikifier.HarnessWikiAlign model.InputText makeServiceResult
       | WikiExtracts -> makeCmd Wikifier.HarnessWikiExtracts model.InputText makeServiceResult
+      | InitializeCachedElaboratedFeedback -> makeCmd CachedElaboratedFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
       | InitializeParaphraseCache -> makeCmd Paraphrase.InitializeParaphraseCache model.JsonInput.Value makeServiceResult
@@ -180,6 +184,7 @@ let update msg (model:Model) =
       // | TutorialDialogue -> TutorialDialogue.DialogueState.Initialize "" "" |> toJson
       | TutorialDialogue -> TutorialDialogue.DialogueState.InitializeTest() |> toJson
       | ElaboratedFeedback -> ElaboratedFeedback.HarnessElaboratedFeedbackRequest.InitializeTest() |> toJson
+      | CachedElaboratedFeedback -> CachedElaboratedFeedback.HarnessFeedbackRequest.InitializeTest() |> toJson
       | DefinitionalFeedback -> DefinitionalFeedback.HarnessFeedbackRequest.InitializeTest() |> toJson
       | WikiAlign | WikiExtracts -> Wikifier.HarnessWikifyAlignRequest.InitializeTest() |> toJson
       | _ -> ""
@@ -252,7 +257,9 @@ let view model dispatch =
                   option [ Value Service.AllCloze ] [ str "Get All Cloze" ]
                   option [ Value Service.TutorialDialogue ] [ str "Tutorial Dialogue" ]
                   option [ Value Service.ElaboratedFeedback ] [ str "Elaborated Feedback" ]
+                  option [ Value Service.CachedElaboratedFeedback ] [ str "Cached Elaborated Feedback" ]
                   option [ Value Service.DefinitionalFeedback ] [ str "Definitional Feedback" ]
+                  option [ Value Service.InitializeCachedElaboratedFeedback ] [ str "Initialize Cached Elaborated Feedback" ]
                   option [ Value Service.InitializeDefinitionalFeedback ] [ str "Initialize Definitional Feedback" ]
                   option [ Value Service.InitializeSpellingCorrector ] [ str "Initialize Spelling Corrector" ]
                   option [ Value Service.InitializeParaphraseCache ] [ str "Initialize Paraphrase" ]
@@ -284,6 +291,7 @@ let view model dispatch =
                         model.Service <> Service.AllCloze && 
                         model.Service <> Service.ElaboratedFeedback &&
                         model.Service <> Service.DefinitionalFeedback &&
+                        model.Service <> Service.InitializeCachedElaboratedFeedback &&
                         model.Service <> Service.InitializeDefinitionalFeedback &&
                         model.Service <> Service.InitializeSpellingCorrector &&
                         model.Service <> Service.InitializeParaphraseCache &&
