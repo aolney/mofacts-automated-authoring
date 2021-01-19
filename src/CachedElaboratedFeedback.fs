@@ -21,7 +21,7 @@ let mutable cache = Map.empty
 /// Initialize the cache using a JSON object of string[][] because ofJson doesn't like tuples as keys
 let Initialize jsonDictionary =
     try
-        cache <- jsonDictionary |> ofJson<string[][]> |> Array.map( fun arr -> (arr.[0],arr.[1]), arr.[2]) |> Map.ofArray
+        cache <- jsonDictionary |> ofJson<string[][]> |> Array.choose( fun arr -> if arr.[2].Trim() <> "" then Some((arr.[0],arr.[1]), arr.[2]) else None) |> Map.ofArray
         promise{ return Ok( null ) }
     with
     | e -> promise{ return Error( e.Message ) }
