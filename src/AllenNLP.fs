@@ -369,12 +369,13 @@ let GetNLP( stringArrayJsonOption : string option ) ( inputText : string )=
 ///////////////////////////////////////////////////////////////////////
 /// Post processing
 /// ///////////////////////////////////////////////////////////////////
-
+/// Match a non-word character preceeded by a space and followed by whitespace
 let prePunctuationSpaceRegex = System.Text.RegularExpressions.Regex(@" ([^\w\s]+)")
+/// Remove pre punctuation spaces using regular expression
 let removePrePunctuationSpaces ( input : string ) =
     prePunctuationSpaceRegex.Replace(input, "$1")
 
-
+/// Use the dependency collapser to simplify dependencies
 let collapseDependencies (sa : SentenceAnnotation) = 
     let ruleTokens = 
         sa.dep.words 
@@ -418,6 +419,14 @@ let srlArgToIndexMap (srlTags : string[]) =
     |> Array.groupBy fst
     |> Map.ofArray
 
+let srlArgToIndexMapWithCollapsedReferents (srlTags : string[]) =
+    srlTags 
+    |> Array.mapi( fun i t -> 
+        //absorb referents, e.g. R-ARG0, into their arguments
+        t.Substring( t.LastIndexOf("-") + 1 ),i )
+    |> Array.groupBy fst
+    |> Map.ofArray
+
 // NOTE: A more direct, though simplified, version of CGA3 follows
 /// Get the subject predicate index of the parse
 /// Had to modify from LTH b/c of different formalism
@@ -445,7 +454,7 @@ let getInvertAuxIndex ( sa : SentenceAnnotation ) =
 
 /// Get the root predicate index of the parse
 /// Had to modify from LTH b/c of different formalism
-/// If ROOT is VB, then take first DOBJ of ROOT : John kissed (root) Mary (dobj) on the head
+/// If ROOT is VB, then take first ~~DOBJ~~ leftmost dependent of ROOT : John kissed (root) Mary (dobj) on the head
 /// If ROOT is anything else, then take ROOT: It was John (root) who came ; Sally was happy (root) to see her
 let getPredicateIndex ( sa : SentenceAnnotation ) = 
     let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
@@ -454,9 +463,34 @@ let getPredicateIndex ( sa : SentenceAnnotation ) =
         sa.dep.predicted_heads 
         //make zero indexed
         |> Array.mapi( fun i h -> i,h - 1)
-        |> Array.tryFindIndex( fun (i,h) -> h = rootIndex && sa.dep.predicted_dependencies.[i] = "dobj" )
+        |> Array.tryFindIndex( fun (i,h) -> h = rootIndex && i > rootIndex  )
+        // restricting to dobj seems too limiting
+        // |> Array.tryFindIndex( fun (i,h) -> h = rootIndex && sa.dep.predicted_dependencies.[i] = "dobj" )
     else
         rootIndex |> Some //NOTE: SPAN WILL DOMINATE S
+
+/// Get all object indices. Follows logic of getPredicateIndex
+let getObjectIndices ( sa : SentenceAnnotation ) = 
+    let rootIndex = sa.dep.predicted_heads |> Array.findIndex( fun h -> h = 0) //assuming there is always a root...
+    if sa.dep.pos.[rootIndex].StartsWith("VB") then
+        //the first child of the verb that is a dobj (starting from the beginning shouldn't matter)
+        sa.dep.predicted_heads 
+        //make zero indexed
+        |> Array.mapi( fun i h -> i,h - 1)
+        |> Array.filter( fun (i,h) -> 
+            // h = rootIndex && //this would require them to be children of ROOT
+            (sa.dep.predicted_dependencies.[i] = "dobj" || sa.dep.predicted_dependencies.[i]  = "iobj" ) )
+        |> Array.map( fun (i,h) -> Some <| i)
+        // |> Array.map snd
+    else
+        Array.empty
+
+/// Get the root of the span as the leftmost token whose root is outside the span.
+let getRootOfSpan ( start : int) (stop : int) ( sa : SentenceAnnotation ) = 
+    //make zero indexed, because start/stop are
+    let spanHeads = sa.dep.predicted_heads.[start..stop] |> Array.map( fun h -> h - 1)
+    let spanHeadIndex = spanHeads |> Array.findIndex( fun h -> h  < start || h  > stop ) 
+    start + spanHeadIndex //offset
 
 /// Get referent label that best represents coreferents in chain
 let resolveReferents ( da : DocumentAnnotation ) =

@@ -180,6 +180,26 @@ type DialogueState =
     // static member InitializeTest() = DialogueState.Initialize """Parts of the axial portion of the body can be described using terms similar to the names of the __________ within them.""" "cavities"
     static member InitializeTest() = DialogueState.Initialize """The interstitial fluid, which bathes cells in the body, is the environment to which those cells are most directly exposed, but the composition of the interstitial fluid is in equilibrium with the composition of the blood plasma, so both contribute to the ______ ______""" "internal environment"
 
+
+// BEHAVIOR IN MOFACTS AS OF 1/20/21
+// - student gets item wrong
+// System: "Incorrect, the correct answer is <correct answer>".
+// System does a transition statement:
+// [
+// "That wasn’t right, so to help you build the knowledge let’s chat about it
+// for a little.",
+// "That wasn’t the answer we are looking for. To help you construct the
+// understanding, let’s have a short discussion.",
+// "Sorry, but that wasn’t quite right. Let’s talk through this item.",
+// "Incorrect. Lets help you build that knowledge with a brief discussion.",
+// "The right answer is different. To get you started learning it, let’s chat."
+// ,
+// "Your answer was incorrect. Let’s talk about this some more.",
+// "Not quite. I’m going to ask you some follow up questions."
+// ]
+// System uses GetDialogue to generate the remaining tutorial dialogue
+
+/// Given a dialogue state, generate a new dialogue state. This is meant to be called repeatedly until Finished is false.
 let GetDialogue (state:DialogueState) =
     promise{
         //Accumulate errors
@@ -235,12 +255,20 @@ let GetDialogue (state:DialogueState) =
             let currentQuestionOption,newQuestions =
                 //TODO add more sophisticated selection logic
                 let hintOption = questions |> Array.tryFind(fun q -> q.QuestionType = Hint )
-                let promptOption = questions |> Array.tryFind(fun q -> q.QuestionType = Prompt )
-                match state.LastQuestion, hintOption, promptOption with
+                let prompts = questions |> Array.filter(fun q -> q.QuestionType = Prompt )
+                match state.LastQuestion, hintOption, prompts with
                 //Initial move, we have a hint, so do hint
                 | None, Some(h), _ -> h |> Some, questions |> Array.filter( fun q -> q <> h )
                 //Last was hint, we have a prompt, so do prompt
-                | Some(lastQ),_,Some(p) when lastQ.QuestionType = Hint -> p |> Some, questions |> Array.filter( fun q -> q <> p )
+                | Some(lastQ),_,ps when lastQ.QuestionType = Hint && ps.Length > 0 -> 
+                    // Score available prompts according to how much their focus matches the answer of the last question, so giving a clue
+                    let lastSet = lastQ.Answer.Split( ' ' ) |> Set.ofArray
+                    let p = ps |> Array.maxBy( fun ap ->
+                        let candidateSet = ap.Focus.Split( ' ' ) |> Set.ofArray
+                        let intersection = Set.intersect candidateSet lastSet
+                        intersection.Count
+                    )
+                    p |> Some, questions |> Array.filter( fun q -> q <> p )
                 //Any other case (e.g. last question was prompt or we are out of questions) set current question to None
                 | _ -> None, questions
 
@@ -317,8 +345,55 @@ let GetDialogue (state:DialogueState) =
             return Error(errorPayload |> String.concat "\n") 
     }
 
-// Example test JSON for App InputText
-// {
-//   "ClozeItem": "John ate a _____ because he was hungry.",
-//   "ClozeAnswer": "hamburger"
-// }
+
+/// This function should only be called by the test harness GUI. It wraps GetDialogue to match the test harness API
+let HarnessGetDialogue jsonState =
+    let state = jsonState |> ofJson<DialogueState>
+    GetDialogue state
+
+
+/// Get a DialogueState initialized by elaborated feedback.
+/// GetDialogue can then be called with this state.
+let GetElaboratedDialogueState correctAnswer incorrectAnswer clozeItem =
+    promise {
+        // Spring 2021: we are only using cached elaborated feedback for performance issues
+        //NOTE: ideally we'd be working with an annotated object here (including coreferece) instead of raw text for performance reasons
+        let! efResult = CachedElaboratedFeedback.GenerateFeedback incorrectAnswer correctAnswer
+        match efResult with
+        | Ok(ef) ->
+            //remove correctness statement from ef
+            let cs = CachedElaboratedFeedback.correctnessStatement incorrectAnswer correctAnswer
+            // OPTION: use a JS sentence segmenter: https://www.npmjs.com/package/cldr-segmentation
+            let candidateSentences = ef.Feedback.Replace( cs, "").Split('.')
+
+            // Search for incorrect/correct answers in the elaborated feedback
+            let jointOption = candidateSentences |> Array.tryFind( fun s -> s.ToLower().Contains( incorrectAnswer.ToLower() ) && s.ToLower().Contains( correctAnswer.ToLower() ) )
+            let iaOption = candidateSentences |> Array.tryFind( fun s -> s.ToLower().Contains( incorrectAnswer.ToLower() ) )
+            let caOption = candidateSentences |> Array.tryFind( fun s -> s.ToLower().Contains( correctAnswer.ToLower() ) )
+
+            // Create a proxy for the cloze item/answer required by GetDialogue, starting with a sentence that contains both, 
+            // backing off to incorrect answer, backing of to correct answer, backing off to cloze item
+            let pseudoCloze,pseudoClozeAnswer = 
+                match jointOption,iaOption,caOption with
+                | Some(j), _, _ -> j + ".", incorrectAnswer
+                | _, Some(i), _ -> i + ".", incorrectAnswer
+                | _, _, Some(c) -> c + ".", correctAnswer
+                | _ -> clozeItem, correctAnswer
+
+            return Ok( DialogueState.Initialize pseudoCloze pseudoClozeAnswer )
+
+        | Error(e) -> return Error(e)
+    }
+    
+
+type HarnessElaboratedDialogueState =
+    { 
+        CorrectAnswer : string
+        IncorrectAnswer : string
+        ClozeItem : string
+    }
+    static member InitializeTest() = { CorrectAnswer = "cerebellum" ; IncorrectAnswer = "cerebrum"; ClozeItem= "Small amounts enter the central canal of the spinal cord, but most CSF circulates through the subarachnoid space of both the brain and the spinal cord by passing through openings in the wall of the fourth ventricle near the cerebellum ."}
+  
+let HarnessGetElaboratedDialogueState jsonState = 
+    let state = jsonState |> ofJson<HarnessElaboratedDialogueState>
+    GetElaboratedDialogueState state.CorrectAnswer state.IncorrectAnswer state.ClozeItem
