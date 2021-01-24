@@ -97,7 +97,7 @@ let tripleIndicesFromSrlTags (srlTags : string[]) =
     else
         None,None,None
 
-//CGA3 implementation was entirely dependency based and allowed for only 1 root be form
+//CGA3 implementation was entirely dependency based and allowed for only 1 root be-form
 //AllenNLP SRL works for be-forms, so we have option of nicely retrieving multiple in a single SA and then using dependencies to fix errors.
 /// Returns all be-form triples by jointly using SRL and dependencies
 // let IsATriples ( sa : SentenceAnnotation ) =

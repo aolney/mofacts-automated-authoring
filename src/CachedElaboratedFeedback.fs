@@ -9,9 +9,18 @@ let inline ofJson<'T> json = Decode.Auto.unsafeFromString<'T>(json)
 // This module caches elaborated feedback generated offline for common errors
 // It backs off to definitional feedback if nothing is found in the cache.
 
+type Tag =
+    /// Did we use definitional feedback
+    | DefinitionalFeedback
+    /// Did we use cached elaborated feedback
+    | CachedElaboratedFeedback
+    /// Debug information
+    | Trace of string
+
 type Feedback =
     {
-        feedback : string
+        Feedback : string
+        Tags: Tag[]
     }
 
 
@@ -35,7 +44,7 @@ let correctnessStatement incorrectAnswer correctAnswer =
 /// Generate elaborated feedback from the cache, backing off to definitional feedback
 let GenerateFeedback incorrectAnswer correctAnswer =
     promise {
-
+        let tags = ResizeArray<Tag>();
         /// Search for incorrect,correct and correct,incorrect at once, preferring the incorrect,correct order consistent with the cache design
         /// and backing off to definitional feedback if neither is found
         let elaboratedFeedback =
@@ -45,14 +54,20 @@ let GenerateFeedback incorrectAnswer correctAnswer =
             | None, None -> None
 
         if elaboratedFeedback.IsSome then
+            tags.Add(CachedElaboratedFeedback)
             let cs = correctnessStatement incorrectAnswer correctAnswer
-            return Ok( {feedback = cs + elaboratedFeedback.Value } )
+            return Ok( {Feedback = cs + elaboratedFeedback.Value; Tags=tags.ToArray() } )
         else 
             let! dfResult = DefinitionalFeedback.GenerateFeedback incorrectAnswer correctAnswer
             match dfResult with
-            | Ok(df) -> return Ok( {feedback = df.feedback } )
+            | Ok(df) -> 
+                tags.Add(DefinitionalFeedback)
+                return Ok( {Feedback = df.feedback; Tags=tags.ToArray() } )
             // DefinitionalFeedback.GenerateFeedback doesn't return errors, so this case exists to avoid compiler warnings
-            | Error( e ) -> return  Ok( {feedback = null } )
+            | Error( e ) -> 
+                let trace = Trace <| "Unable to generate feedback. Elaborated feedback cache is " + if cache.IsEmpty then "empty" else "full" + ". Definition feedback is " + if DefinitionalFeedback.definitionMap.IsEmpty then "empty." else "full."
+                tags.Add(trace)
+                return  Ok( {Feedback = null; Tags=tags.ToArray() } )
     }
 
 type HarnessFeedbackRequest =

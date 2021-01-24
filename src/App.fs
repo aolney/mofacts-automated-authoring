@@ -51,6 +51,7 @@ type Service =
   | DefinitionalFeedback
   | Paraphrase
   | ResolveTextReferents
+  | GenerateQuestions
   | AnswerQuestion
   | Wikify
   | WikiAlign
@@ -60,6 +61,7 @@ type Service =
   | InitializeSpellingCorrector
   | InitializeParaphraseCache
   | TutorialDialogue
+  | ElaboratedTutorialDialogueState
   | Test
 
 type Model = 
@@ -88,6 +90,7 @@ type Msg =
     | ServiceResult of string * string
     | ServiceChange of Service
     | DownloadJson
+    | JsonToInput
     | LoadJsonFile of Browser.Types.FileList
     | SetJson of string
     | ClearJson
@@ -154,6 +157,7 @@ let update msg (model:Model) =
       | Inflection -> makeCmd LemmInflect.testGetInflection model.InputText makeServiceResult
       | Paraphrase -> makeCmd Paraphrase.getParaphrases model.InputText makeServiceResult
       | ResolveTextReferents -> makeCmd AllenNLP.ResolveTextReferents model.InputText makeServiceResult
+      | GenerateQuestions -> makeCmd QuestionGenerator.HarnessGetQuestions model.InputText makeServiceResult
       | AnswerQuestion -> makeCmd LongformQA.testAnswer model.InputText makeServiceResult
       | Wikify -> makeCmd Wikifier.GetWikification model.InputText makeServiceResult
       | WikiAlign -> makeCmd Wikifier.HarnessWikiAlign model.InputText makeServiceResult
@@ -162,7 +166,9 @@ let update msg (model:Model) =
       | InitializeDefinitionalFeedback -> makeCmd DefinitionalFeedback.Initialize model.JsonInput.Value makeServiceResult
       | InitializeSpellingCorrector -> makeCmd SpellingCorrector.Initialize model.JsonInput.Value makeServiceResult
       | InitializeParaphraseCache -> makeCmd Paraphrase.InitializeParaphraseCache model.JsonInput.Value makeServiceResult
-      | TutorialDialogue -> makeCmd TutorialDialogue.GetDialogue (model.InputText |> ofJson<TutorialDialogue.DialogueState> ) makeServiceResult
+      | TutorialDialogue -> makeCmd (TutorialDialogue.HarnessGetDialogue) model.InputText makeServiceResult
+      | ElaboratedTutorialDialogueState -> makeCmd (TutorialDialogue.HarnessGetElaboratedDialogueState) model.InputText makeServiceResult
+      // | TutorialDialogue -> makeCmd TutorialDialogue.GetDialogue (model.InputText |> ofJson<TutorialDialogue.DialogueState> ) makeServiceResult
       | Test -> makeCmd (AllenNLP.resolveReferents >> AllenNLP.Promisify) (model.JsonInput.Value |> ofJson<AllenNLP.DocumentAnnotation> ) makeServiceResult
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
@@ -181,14 +187,19 @@ let update msg (model:Model) =
     //Some services require json in the Input box
     let inputText = 
       match service with
-      // | TutorialDialogue -> TutorialDialogue.DialogueState.Initialize "" "" |> toJson
+      // For service that requires more than a string as input, we define a json object for the parameters and 
+      // prepopulate the input box with exemplar json for the user to modify
       | TutorialDialogue -> TutorialDialogue.DialogueState.InitializeTest() |> toJson
+      | GenerateQuestions -> QuestionGenerator.InitializeTest()
+      | ElaboratedTutorialDialogueState -> TutorialDialogue.HarnessElaboratedDialogueState.InitializeTest() |> toJson
       | ElaboratedFeedback -> ElaboratedFeedback.HarnessElaboratedFeedbackRequest.InitializeTest() |> toJson
       | CachedElaboratedFeedback -> CachedElaboratedFeedback.HarnessFeedbackRequest.InitializeTest() |> toJson
       | DefinitionalFeedback -> DefinitionalFeedback.HarnessFeedbackRequest.InitializeTest() |> toJson
       | WikiAlign | WikiExtracts -> Wikifier.HarnessWikifyAlignRequest.InitializeTest() |> toJson
       | _ -> ""
     ( {model with Service=service; Status=""; InputText = inputText}, [])
+  | JsonToInput ->
+    ( {model with InputText=model.JsonResult; JsonResult=""}, [])
   | DownloadJson ->
       let a = document.createElement("a") :?> Browser.Types.HTMLLinkElement
       //need blobs for larger sizes
@@ -243,7 +254,7 @@ let view model dispatch =
             Size 100.0
             Style [
                 Width "100%"
-                Height "75px"
+                Height "150px"
             ] 
             OnChange (fun ev ->  !!ev.target?value |> UpdateText|> dispatch )
           ] []
@@ -256,6 +267,7 @@ let view model dispatch =
                   option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
                   option [ Value Service.AllCloze ] [ str "Get All Cloze" ]
                   option [ Value Service.TutorialDialogue ] [ str "Tutorial Dialogue" ]
+                  option [ Value Service.ElaboratedTutorialDialogueState ] [ str "Initialize Elaborated Tutorial Dialogue State" ]
                   option [ Value Service.ElaboratedFeedback ] [ str "Elaborated Feedback" ]
                   option [ Value Service.CachedElaboratedFeedback ] [ str "Cached Elaborated Feedback" ]
                   option [ Value Service.DefinitionalFeedback ] [ str "Definitional Feedback" ]
@@ -270,6 +282,7 @@ let view model dispatch =
                   option [ Value Service.Paraphrase ] [ str "Paraphrase" ]
                   option [ Value Service.ResolveTextReferents ] [ str "Resolve Coreference" ]
                   option [ Value Service.AnswerQuestion ] [ str "Answer Question" ]
+                  option [ Value Service.GenerateQuestions ] [ str "Generate Questions" ]
                   option [ Value Service.Wikify ] [ str "Wikify" ]
                   option [ Value Service.WikiAlign ] [ str "Wikify Align" ]
                   option [ Value Service.WikiExtracts ] [ str "Wiki Extracts" ]
@@ -350,10 +363,22 @@ let view model dispatch =
         // View model state and get results
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsTwoThirds) ] [
           Label.label [ ] [ str "Model State" ]
-          Button.button [ 
-            Button.Color IsPrimary
-            Button.OnClick (fun _ -> dispatch DownloadJson )
-            ] [ str "Download JSON" ]
+          Fulma.Columns.columns [] [     
+            Fulma.Column.column [ ] [
+              Button.button [ 
+                Button.Color IsPrimary
+                Button.OnClick (fun _ -> dispatch DownloadJson )
+                ] [ str "Download JSON" ]
+            ]
+            Fulma.Column.column [ ] [
+              Button.button [ 
+                Button.Color IsPrimary
+                Button.OnClick (fun _ -> dispatch JsonToInput )
+                ] [ str "JSON to Input" ]
+            ]
+            // purely to bring buttons closer together
+            Fulma.Column.column [ Column.Width (Screen.All, Column.IsTwoThirds) ] []
+          ]
           //debuggy but also generally useful
           pre [  Style [FontSize 10.0 ] ] [  str <| (model |> toJson).Replace("\\n","\n").Replace("\\\"","\"") ]
           //span [  Style [FontSize 10.0; WhiteSpace "pre-wrap"] ] [  str <| (model |> toJson).Replace("\\n","\n").Replace("\\\"","\"") ]
