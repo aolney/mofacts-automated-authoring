@@ -147,7 +147,7 @@ type Configuration =
         UseCloze : bool;
         /// Implies glossary by default
         UseGlossaryDefinitions : bool;
-        /// Requires UseDefintions to be true
+        /// Requires UseGlossaryDefinitions to be true
         UseWikipediaDefinitionsForMissingGlossaryDefinitions : bool;
         ElasticDocsContainBothKeys : bool;
         MaxElasticDocs : int;
@@ -435,6 +435,24 @@ type AblationCondition =
     | [<CompiledName("NoClozeGlossaryDefinitions")>] NoClozeGlossaryDefinitions
     /// The full system!
     | [<CompiledName("Full011720")>] Full011720
+    // The next 16 conditions are for the evaluation paper: 
+    // Defi Y means definitions are used (both types); Cloz Y means cloze is used; Keyf Y means elasticsearch docs are filtered to contain both terms; Corf Y means sentences sentences that don't contain a key term, even when coref is resolved, are filtered out
+    | [<CompiledName("Defi_Y__Cloz_Y__Keyf_Y__Corf_Y")>] Defi_Y__Cloz_Y__Keyf_Y__Corf_Y
+    | [<CompiledName("Defi_N__Cloz_Y__Keyf_Y__Corf_Y")>] Defi_N__Cloz_Y__Keyf_Y__Corf_Y
+    | [<CompiledName("Defi_Y__Cloz_N__Keyf_Y__Corf_Y")>] Defi_Y__Cloz_N__Keyf_Y__Corf_Y
+    | [<CompiledName("Defi_N__Cloz_N__Keyf_Y__Corf_Y")>] Defi_N__Cloz_N__Keyf_Y__Corf_Y
+    | [<CompiledName("Defi_Y__Cloz_Y__Keyf_N__Corf_Y")>] Defi_Y__Cloz_Y__Keyf_N__Corf_Y
+    | [<CompiledName("Defi_N__Cloz_Y__Keyf_N__Corf_Y")>] Defi_N__Cloz_Y__Keyf_N__Corf_Y
+    | [<CompiledName("Defi_Y__Cloz_N__Keyf_N__Corf_Y")>] Defi_Y__Cloz_N__Keyf_N__Corf_Y
+    | [<CompiledName("Defi_N__Cloz_N__Keyf_N__Corf_Y")>] Defi_N__Cloz_N__Keyf_N__Corf_Y
+    | [<CompiledName("Defi_Y__Cloz_Y__Keyf_Y__Corf_N")>] Defi_Y__Cloz_Y__Keyf_Y__Corf_N
+    | [<CompiledName("Defi_N__Cloz_Y__Keyf_Y__Corf_N")>] Defi_N__Cloz_Y__Keyf_Y__Corf_N
+    | [<CompiledName("Defi_Y__Cloz_N__Keyf_Y__Corf_N")>] Defi_Y__Cloz_N__Keyf_Y__Corf_N
+    | [<CompiledName("Defi_N__Cloz_N__Keyf_Y__Corf_N")>] Defi_N__Cloz_N__Keyf_Y__Corf_N
+    | [<CompiledName("Defi_Y__Cloz_Y__Keyf_N__Corf_N")>] Defi_Y__Cloz_Y__Keyf_N__Corf_N
+    | [<CompiledName("Defi_N__Cloz_Y__Keyf_N__Corf_N")>] Defi_N__Cloz_Y__Keyf_N__Corf_N
+    | [<CompiledName("Defi_Y__Cloz_N__Keyf_N__Corf_N")>] Defi_Y__Cloz_N__Keyf_N__Corf_N
+    | [<CompiledName("Defi_N__Cloz_N__Keyf_N__Corf_N")>] Defi_N__Cloz_N__Keyf_N__Corf_N
 
 let ElaboratedFeedbackCondition( row : string)(condition : AblationCondition) =
     let config = 
@@ -442,7 +460,23 @@ let ElaboratedFeedbackCondition( row : string)(condition : AblationCondition) =
         | NoClozeNoDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = false; UseWikipediaDefinitionsForMissingGlossaryDefinitions = false; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
         | NoClozeGlossaryDefinitions -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
         | Full011720 -> Some <| { UseCloze = true; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
-  
+        | Defi_Y__Cloz_Y__Keyf_Y__Corf_Y -> Some <| { UseCloze = true; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_Y__Keyf_Y__Corf_Y -> Some <| { UseCloze = true; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_Y__Cloz_N__Keyf_Y__Corf_Y -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_N__Keyf_Y__Corf_Y -> Some <| { UseCloze = false; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_Y__Cloz_Y__Keyf_N__Corf_Y -> Some <| { UseCloze = true; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_Y__Keyf_N__Corf_Y -> Some <| { UseCloze = true; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_Y__Cloz_N__Keyf_N__Corf_Y -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_N__Keyf_N__Corf_Y -> Some <| { UseCloze = false; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_Y__Cloz_Y__Keyf_Y__Corf_N -> Some <| { UseCloze = true; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_Y__Keyf_Y__Corf_N -> Some <| { UseCloze = true; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_Y__Cloz_N__Keyf_Y__Corf_N -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_N__Keyf_Y__Corf_N -> Some <| { UseCloze = false; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_Y__Cloz_Y__Keyf_N__Corf_N -> Some <| { UseCloze = true; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_Y__Keyf_N__Corf_N -> Some <| { UseCloze = true; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_Y__Cloz_N__Keyf_N__Corf_N -> Some <| { UseCloze = false; UseGlossaryDefinitions = true;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = true;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+        | Defi_N__Cloz_N__Keyf_N__Corf_N -> Some <| { UseCloze = false; UseGlossaryDefinitions = false;  UseWikipediaDefinitionsForMissingGlossaryDefinitions = false;  ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+
     let s = row.Split('\t')
     GetElaboratedFeedback s.[0] s.[1] s.[2] config
        
