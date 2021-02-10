@@ -63,11 +63,13 @@ let GenerateFeedback incorrectAnswer correctAnswer =
             | Ok(df) -> 
                 tags.Add(DefinitionalFeedback)
                 return Ok( {Feedback = df.feedback; Tags=tags.ToArray() } )
-            // DefinitionalFeedback.GenerateFeedback doesn't return errors, so this case exists to avoid compiler warnings
+            // ~~DefinitionalFeedback.GenerateFeedback doesn't return errors, so this case exists to avoid compiler warnings~~
             | Error( e ) -> 
-                let trace = Trace <| "Unable to generate feedback. Elaborated feedback cache is " + if cache.IsEmpty then "empty" else "full" + ". Definition feedback is " + if DefinitionalFeedback.definitionMap.IsEmpty then "empty." else "full."
-                tags.Add(trace)
-                return  Ok( {Feedback = null; Tags=tags.ToArray() } )
+                // let trace = Trace <| "Unable to generate feedback. Elaborated feedback cache is " + if cache.IsEmpty then "empty" else "full" + ". Definition feedback is " + if DefinitionalFeedback.definitionMap.IsEmpty then "empty." else "full."
+                // tags.Add(trace)
+                // return  Ok( {Feedback = null; Tags=tags.ToArray() } )
+                let message = "Unable to generate elaborated feedback. Elaborated feedback cache is " + if cache.IsEmpty then "empty" else "full" + ". " + e
+                return  Error( message )
     }
 
 type HarnessFeedbackRequest =

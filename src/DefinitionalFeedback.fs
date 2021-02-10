@@ -166,7 +166,11 @@ let GenerateFeedback incorrectAnswer correctAnswer =
                 "The difference is that " + getDeterminerPhrase( incorrectAnswerSpellingMatch )  + " " + getPredicate( incorrectEntry ) + 
                 ", and " + getDeterminerPhrase( correctAnswer ) + " " + getPredicate( correctEntry ) + "."
             | _ -> null
-        return Ok( {feedback = feedback } )
+        //return Ok( {feedback = feedback } )
+        if feedback <> null then
+            return Ok( {feedback = feedback } )
+        else 
+            return Error( "Unable to generate definitional feedback. Definitional feedback cache is " + if definitionMap.IsEmpty then "empty" else "full" ) 
     }
 
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API
