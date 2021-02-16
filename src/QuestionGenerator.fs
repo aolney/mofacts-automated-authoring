@@ -291,7 +291,11 @@ let whSrlSubstitutions ( sa : SentenceAnnotation ) =
                 else
                     [||]
             
-            Substitution.Create(sa, start, stop, argNIndices,whString,focusIndices,tags.ToArray()) |> Some
+            // 2/15: disallow absence of focus indices
+            if focusIndices.Length = 0 then
+                None
+            else
+                Substitution.Create(sa, start, stop, argNIndices,whString,focusIndices,tags.ToArray()) |> Some
         ) |> Some
             
     )
@@ -436,13 +440,17 @@ let hint( sa : SentenceAnnotation ) (sub : Substitution) =
         Some <| Question.Create( QuestionType.Hint, text |> questionCase, focusString, answer,  tags.ToArray())
 
 
+// 2/15 TODO: return a result for error handling and bubble to Tutorial Dialogue?
 let GetQuestions ( sa : SentenceAnnotation ) =
     let plans =  
         sa 
         |> getSubstitutions
         // promote subs that have a rare focus to avoid generic/nonspecific questions
         |> Array.sortBy( fun s ->
-            s.FocusIndices |> Array.map( fun i -> sa.dep.words.[i] |> WordFrequency.Get )|> Array.min 
+            if s.FocusIndices.Length > 0 then
+                s.FocusIndices |> Array.map( fun i -> sa.dep.words.[i] |> WordFrequency.Get )|> Array.min 
+            else
+                1.0 //deprioritize questions without a focus ; 2/15: questions without a focus are now illegal
         )
 
     // generate questions and remove duplicates by type

@@ -326,17 +326,22 @@ let GetDialogue (state:DialogueState) =
                 | Some(x) -> true |> Some
                 | None -> false |> Some
 
-            //TODO add wrapping for logging purposes
-            return Ok( 
-                { state with 
-                    Questions=newQuestions |> Some; 
-                    LastQuestion=currentQuestionOption; 
-                    CurrentFeedback=feedbackOption;
-                    CurrentElaboration=elaborationOption;
-                    CurrentQuestion = currentQuestionOption;
-                    Display = display |> String.concat " " |> Some;
-                    Finished = finishedOption
-                })
+            // You can't have dialogue without questions (never was a question and isn't one now)
+            // TODO: can we catch failure to generate questions earlier?
+            if state.LastQuestion.IsNone && currentQuestionOption.IsNone then
+                return Error("Aborting dialogue: unable to generate questions")
+            else
+                //TODO add wrapping for logging purposes
+                return Ok( 
+                    { state with 
+                        Questions=newQuestions |> Some; 
+                        LastQuestion=currentQuestionOption; 
+                        CurrentFeedback=feedbackOption;
+                        CurrentElaboration=elaborationOption;
+                        CurrentQuestion = currentQuestionOption;
+                        Display = display |> String.concat " " |> Some;
+                        Finished = finishedOption
+                    })
         else
              //collect all errors; avoid duplicates
             let errorPayload = ResizeArray<string>()
