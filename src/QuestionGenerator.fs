@@ -215,89 +215,99 @@ let whSrlSubstitutions ( sa : SentenceAnnotation ) =
     |> Array.map( fun verb -> verb.tags |> srlArgToIndexMapWithCollapsedReferents |> Map.toArray )
     //Select SRL frames for question generation according to our criteria
     |> Array.choose( fun mapArr -> 
-        let frameTags = ResizeArray<Tag>()
 
-        //for debug
-        let debugAlignment = mapArr |> Array.collect snd |> Array.sortBy snd |> Array.map( fun (a,i) -> {| arg=a ; word=sa.dep.words.[i] ; pos=sa.dep.pos.[i] |}  )
+        //Some frames are degenerate and have no arguments!
+        let hasArguments = mapArr |> Array.exists( fun (srlKey, _) -> srlKey.StartsWith("A"))
+        if hasArguments then
+            try
+                let frameTags = ResizeArray<Tag>()
 
-        //Count the ARGNs, ignoring ARGM/adjuncts
-        let argNs = mapArr |> Array.filter( fun (argType,_) -> argType.StartsWith("ARG") && not <| argType.StartsWith("ARGM") ) |> Array.distinctBy fst 
+                //for debug
+                let debugAlignment = mapArr |> Array.collect snd |> Array.sortBy snd |> Array.map( fun (a,i) -> {| arg=a ; word=sa.dep.words.[i] ; pos=sa.dep.pos.[i] |}  )
 
-        //Filtering concept: 1/24/21
-        //Sometimes we wish to disallow argN substitutions based on the properties of other argNs in the same frame, rather than properties of the argN itself
-        //For SRL, we identify arguments that begin or end with IN/WDT as being WH substitutable but **not** being acceptable when other arguments are WH substituted
-        //therefore, when one of these exist, we remove all other argNs from consideration
-        let disfluentArgN = argNs |> Array.filter( fun (_, indexTuples ) -> 
-            let argNIndices = indexTuples |> Array.map snd 
-            let startPos = sa.dep.pos.[argNIndices.[0]]
-            let stopPos = sa.dep.pos.[argNIndices |> Array.last ]
-            startPos = "IN" || startPos = "WDT" || stopPos = "IN" || stopPos = "WDT"
-            )
-    
-        //If we have no disfluent arguments, proceed with all arguments
-        //If we have exactly one disfluent argument, keep it for substitution and throw the rest away
-        //If we have more than one disfluent argument, throw away the entire frame. TODO: transformations would let us salvage this case
-        let finalArgNs = 
-            match disfluentArgN.Length with
-            | 0 -> argNs
-            | 1 -> frameTags.Add(DisfluentArg) ; disfluentArgN
-            | _ -> [||]
-        
-        //filter out frames without at least 2 ARGN; NOTE: 1/21 why?
-        // if argNs.Length  < 2 then
-        //     None
-        // TODO: rewrite to allow non-nominal spans but only generate questions from nominal spans
-        //filter out frames unless all the ARGNs are nominal spans (i.e. contain a DOBJ or NSUBJX spans the entire ARGN (exclude verb particles, forces more specific questions/no overlap)
-        // else
-        //Get roots of nominals spans if they exist
-        // let nominalSpanRoots = argNs |> Array.choose( fun (_, indexTuples ) -> indexTuples |> Array.map snd |> nominalSpanRootOption sa )
-        //If all ARGNs are nominal spans, lengths should match 
-        // NOTE: things are blowing up here b/c of Stanford Dependencies
-        // TODO rewrite to filter out ARGN that don't have nominal span roots, rather than using this length check
-        // if argNs.Length <> nominalSpanRoots.Length then
-        //     None
-        // else 
-        //start/stop are frame level
-        let indices = argNs |> Array.collect( fun (_,indexTuples) -> indexTuples |> Array.map snd )
-        let start = indices |> Array.min
-        let stop = indices |> Array.max
+                //Count the ARGNs, ignoring ARGM/adjuncts
+                let argNs = mapArr |> Array.filter( fun (argType,_) -> argType.StartsWith("ARG") && not <| argType.StartsWith("ARGM") ) |> Array.distinctBy fst 
 
-        //to get question focus, split finalArgNs into the replacement argument and the rest
-        let replaceFocusTuples = [|
-            for a in finalArgNs do
-                let argNsList = argNs |> ResizeArray
-                //argNsList now fluent b/c we removed one and only disfluent arg
-                argNsList.Remove(a) |> ignore
-                yield a,argNsList
-        |]
-        //for each tuple, create a substitution
-        replaceFocusTuples 
-        |> Array.mapi( fun i ((argN, indexTuples ),fans) ->
-            let tags = ResizeArray<Tag>()
-            tags.AddRange(frameTags)
-            tags.Add(WhArg <| argN)
-            let argNIndices = indexTuples |> Array.map snd 
-            let argNRoot = getRootOfSpan argNIndices.[0] (argNIndices |> Array.last) sa
-            let whString, whTags = sa |> wh argNRoot ( argN.EndsWith("0") ) //assume ARG0 is nominative; TODO: clean up wh with NER or similar
-            tags.AddRange(whTags)
-            //If we have > 2 arguments, we have a choice of what to focus. As a general rule, the lower args are more central
-            let focusIndices = 
-                if fans.Count > 0 then
-                    let indices = fans.[0] |> snd |> Array.map snd
-                    let focusIndex = getRootOfSpan indices.[0] (indices |> Array.last) sa
-                    let focusWord = sa.dep.words.[focusIndex]
-                    tags.Add( FocusTarget(focusIndex,focusWord) )
-                    indices
-                else
-                    [||]
+                //Filtering concept: 1/24/21
+                //Sometimes we wish to disallow argN substitutions based on the properties of other argNs in the same frame, rather than properties of the argN itself
+                //For SRL, we identify arguments that begin or end with IN/WDT as being WH substitutable but **not** being acceptable when other arguments are WH substituted
+                //therefore, when one of these exist, we remove all other argNs from consideration
+                let disfluentArgN = argNs |> Array.filter( fun (_, indexTuples ) -> 
+                    let argNIndices = indexTuples |> Array.map snd 
+                    let startPos = sa.dep.pos.[argNIndices.[0]]
+                    let stopPos = sa.dep.pos.[argNIndices |> Array.last ]
+                    startPos = "IN" || startPos = "WDT" || stopPos = "IN" || stopPos = "WDT"
+                    )
             
-            // 2/15: disallow absence of focus indices
-            if focusIndices.Length = 0 then
-                None
-            else
-                Substitution.Create(sa, start, stop, argNIndices,whString,focusIndices,tags.ToArray()) |> Some
-        ) |> Some
-            
+                //If we have no disfluent arguments, proceed with all arguments
+                //If we have exactly one disfluent argument, keep it for substitution and throw the rest away
+                //If we have more than one disfluent argument, throw away the entire frame. TODO: transformations would let us salvage this case
+                let finalArgNs = 
+                    match disfluentArgN.Length with
+                    | 0 -> argNs
+                    | 1 -> frameTags.Add(DisfluentArg) ; disfluentArgN
+                    | _ -> [||]
+                
+                //filter out frames without at least 2 ARGN; NOTE: 1/21 why?
+                // if argNs.Length  < 2 then
+                //     None
+                // TODO: rewrite to allow non-nominal spans but only generate questions from nominal spans
+                //filter out frames unless all the ARGNs are nominal spans (i.e. contain a DOBJ or NSUBJX spans the entire ARGN (exclude verb particles, forces more specific questions/no overlap)
+                // else
+                //Get roots of nominals spans if they exist
+                // let nominalSpanRoots = argNs |> Array.choose( fun (_, indexTuples ) -> indexTuples |> Array.map snd |> nominalSpanRootOption sa )
+                //If all ARGNs are nominal spans, lengths should match 
+                // NOTE: things are blowing up here b/c of Stanford Dependencies
+                // TODO rewrite to filter out ARGN that don't have nominal span roots, rather than using this length check
+                // if argNs.Length <> nominalSpanRoots.Length then
+                //     None
+                // else 
+                //start/stop are frame level
+                let indices = argNs |> Array.collect( fun (_,indexTuples) -> indexTuples |> Array.map snd )
+                let start = indices |> Array.min
+                let stop = indices |> Array.max
+
+                //to get question focus, split finalArgNs into the replacement argument and the rest
+                let replaceFocusTuples = [|
+                    for a in finalArgNs do
+                        let argNsList = argNs |> ResizeArray
+                        //argNsList now fluent b/c we removed one and only disfluent arg
+                        argNsList.Remove(a) |> ignore
+                        yield a,argNsList
+                |]
+                //for each tuple, create a substitution
+                replaceFocusTuples 
+                |> Array.mapi( fun i ((argN, indexTuples ),fans) ->
+                    let tags = ResizeArray<Tag>()
+                    tags.AddRange(frameTags)
+                    tags.Add(WhArg <| argN)
+                    let argNIndices = indexTuples |> Array.map snd 
+                    let argNRoot = getRootOfSpan argNIndices.[0] (argNIndices |> Array.last) sa
+                    let whString, whTags = sa |> wh argNRoot ( argN.EndsWith("0") ) //assume ARG0 is nominative; TODO: clean up wh with NER or similar
+                    tags.AddRange(whTags)
+                    //If we have > 2 arguments, we have a choice of what to focus. As a general rule, the lower args are more central
+                    let focusIndices = 
+                        if fans.Count > 0 then
+                            let indices = fans.[0] |> snd |> Array.map snd
+                            let focusIndex = getRootOfSpan indices.[0] (indices |> Array.last) sa
+                            let focusWord = sa.dep.words.[focusIndex]
+                            tags.Add( FocusTarget(focusIndex,focusWord) )
+                            indices
+                        else
+                            [||]
+                    
+                    // 2/15: disallow absence of focus indices
+                    if focusIndices.Length = 0 then
+                        None
+                    else
+                        Substitution.Create(sa, start, stop, argNIndices,whString,focusIndices,tags.ToArray()) |> Some
+                ) |> Some
+            // random exception, abort ; TODO: prevents us from seeing errors we would otherwise correct, so refactor for logging?
+            with
+            |    _ -> None
+        // srl had no arguments
+        else
+            None
     )
     |> Array.collect id
     |> ResizeArray //Array.toList
