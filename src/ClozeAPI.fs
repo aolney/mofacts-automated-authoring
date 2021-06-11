@@ -388,7 +388,7 @@ type IJsDiff =
 [<ImportAll("diff")>]
 let diff : IJsDiff = jsNative
 
-
+/// 20200714 Generate data requested by Luke Eglington. Gets all clozables, resolves coref, and calculates some properties related to cloze generation/selection
 let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( stringArrayJsonOption : string option) ( inputText : string )=
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
@@ -457,7 +457,7 @@ let GetAllClozeLukeFormat20200714 (nlpJsonOption: string option) ( stringArrayJs
             return Error(e)
     }
     
-
+/// 20201218 Generate data requested by Luke Eglington. Gets all clozables, resolves coref, and calculates some properties related to cloze generation/selection
 let GetAllClozeLukeFormat20201218 (nlpJsonOption: string option) ( stringArrayJsonOption : string option) ( inputText : string )=
     promise {
         //Get a DocumentAnnotation if one wasn't passed in
@@ -525,6 +525,38 @@ let GetAllClozeLukeFormat20201218 (nlpJsonOption: string option) ( stringArrayJs
         | Error(e) -> 
             return Error(e)
     }
+
+/// Generate data for human evaluation. Gets all clozables  and calculates some properties related to cloze generation/selection
+let GetAllClozeForHumanEvaluation2021061121 (nlpJsonOption: string option) ( stringArrayJsonOption : string option) ( inputText : string )=
+    promise {
+        //Get a DocumentAnnotation if one wasn't passed in
+        let! nlpResult = 
+            match nlpJsonOption with
+            | Some(nlpJson) -> nlpJson |> ofJson<DocumentAnnotation> |> Promisify 
+            | None -> GetNLP stringArrayJsonOption inputText 
+
+        match nlpResult with
+        //sentence,cloze,sentenceWeight,clozeProbability
+        | Ok(da) ->
+            let clozables = da |> GetClozables |> Array.map( fun ra -> ra.ToArray() )
+            // return Ok( {sentences = da.sentences; coreference = da.coreference; clozables = clozables} )
+            let output = 
+                da.sentences
+                |> Array.mapi( fun i sa ->
+                    let totalWeight = sa |>  GetTotalWeight da.coreference
+                    clozables.[i]
+                    |> Array.map( fun cl -> 
+                        let cloze = cl.words |> String.concat " "
+                        let sentence = sa.sen |> AllenNLP.removePrePunctuationSpaces
+                        {|SentenceWeight=totalWeight; ClozeProbability=cl.prob; Sentence=sentence; SentenceIndex=i; ClozeStart=cl.start; ClozeStop=cl.stop; Cloze=cloze; itemId = hash sa; clozeId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
+                    )
+                )
+            
+            return Ok( output )
+        | Error(e) -> 
+            return Error(e)
+    }
+
 
 //TODO: since we are not allowing truly long fill ins (~4 words long) prefering longer once here 
 //may be causing us to throw items away. To prevent that, the length restriction need to be here as well

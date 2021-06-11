@@ -1,7 +1,7 @@
 {
     // See https://go.microsoft.com/fwlink/?LinkId=733558
     // for the documentation about the tasks.json format
-    "version": "0.1.0",
+    "version": "2.0.0",
     "command": "dotnet",
     "runner": "terminal",
     "args": [],
@@ -10,19 +10,22 @@
     },
     "tasks": [
         {
-            "taskName": "Start",
-            "args": ["fable", "yarn-run", "start" ],
-            "isBuildCommand": true,
-            "suppressTaskName": true,
+            "label": "Start",
+            "command": "dotnet",
+            "args": [
+                "fable",
+                "yarn-run",
+                "start"
+            ],
             "isBackground": true,
             "problemMatcher": {
                 "fileLocation": "absolute",
                 "background": {
                     "activeOnStart": true,
-                    "beginsPattern":{
+                    "beginsPattern": {
                         "regexp": "webpack: Compiling"
                     },
-                    "endsPattern":{
+                    "endsPattern": {
                         "regexp": "webpack: (Compiled successfully|Failed to compile)"
                     }
                 },
@@ -36,7 +39,8 @@
                     "severity": 6,
                     "message": 7
                 }
-            }
+            },
+            "group": "build"
         }
     ]
 }
