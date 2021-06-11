@@ -5,5 +5,5 @@ module.exports = {
 //   entry: path.join(__dirname, "./project/path.fsproj"),
 //   outDir: path.join(__dirname, "./output"),
   //uncomment the file below for sourcemaps
-  //babel: { sourceMaps: "inline" } // enable sourceMaps to see F# code and not generated js in test reports
+  babel: { sourceMaps: "inline" } // enable sourceMaps to see F# code and not generated js in test reports
 };
