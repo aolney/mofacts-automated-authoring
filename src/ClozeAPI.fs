@@ -543,12 +543,19 @@ let GetAllClozeForHumanEvaluation2021061121 (nlpJsonOption: string option) ( str
             let output = 
                 da.sentences
                 |> Array.mapi( fun i sa ->
+                    // sum length of all coref chains in sentence
                     let totalWeight = sa |>  GetTotalWeight da.coreference
+                    // number of coref chains with length > 1
+                    let chainsLengthTwoOrMore = 
+                        sa.cor.clusters 
+                        |> Array.map( fun id -> da.coreference.clusters.[id])
+                        |> Array.filter( fun c -> c.Length > 1)
+                        |> Array.length
                     clozables.[i]
                     |> Array.map( fun cl -> 
                         let cloze = cl.words |> String.concat " "
                         let sentence = sa.sen |> AllenNLP.removePrePunctuationSpaces
-                        {|SentenceWeight=totalWeight; ClozeProbability=cl.prob; Sentence=sentence; SentenceIndex=i; ClozeStart=cl.start; ClozeStop=cl.stop; Cloze=cloze; itemId = hash sa; clozeId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
+                        {|SentenceWeight=totalWeight; Chains=chainsLengthTwoOrMore; ClozeProbability=cl.prob; Sentence=sentence; SentenceIndex=i; ClozeStart=cl.start; ClozeStop=cl.stop; Cloze=cloze; itemId = hash sa; clozeId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
                     )
                 )
             
