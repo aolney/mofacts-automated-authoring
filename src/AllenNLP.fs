@@ -252,6 +252,21 @@ let Split ( pattern : char ) (input: string) = input.Split( pattern
 ///Per sentence text cleaning. NOTE regexes are A&P specific!
 let CleanText input =
     input 
+    //contractions are split by parser (NOTE not exhaustive); normalize them here to avoid headaches later (TODO use rules for this/a better way)
+    |> RegexReplace @"\bisn't\b" "is not"
+    |> RegexReplace @"\baren't\b" "are not"
+    |> RegexReplace @"\bwasn't\b" "was not"
+    |> RegexReplace @"\bweren't\b" "were not"
+    |> RegexReplace @"\bwon't\b" "will not"
+    |> RegexReplace @"\bcan't\b" "can not"
+    |> RegexReplace @"\bcouldn't\b" "could not"
+    |> RegexReplace @"\don't\b" "do not"
+    |> RegexReplace @"\bdoesn't\b" "does not"
+    |> RegexReplace @"\didn't\b" "did not"
+    |> RegexReplace @"\haven't\b" "have not"
+    |> RegexReplace @"\hasn't\b" "has not"
+    |> RegexReplace @"\hadn't\b" "had not"
+    |> RegexReplace @"\that's\b" "that is"
     |> RegexReplace "Page[ 0-9]+" ""
     |> RegexReplace "\(fig[^\)]+\)" ""
     |> RegexReplace "\(see[^\)]+\)" ""
