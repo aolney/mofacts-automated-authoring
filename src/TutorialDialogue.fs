@@ -141,6 +141,13 @@ let dialogueBags =
 let random = System.Random()
 let getRandomMove (dm : StatelessDialogueMoveType) = dialogueBags.[dm].[random.Next(dialogueBags.[dm].Length-1)]
 
+let firstLetterLower (input : string) =
+    input.Substring(0,1).ToLower() + input.Substring(1)
+///Insert a discourse marker at the start of a sentence, adjusting capitalization; assumes first element is discourse marker
+let prefixDiscourseMarker arr =
+    let tail = arr |> Array.skip 1 |> Array.map firstLetterLower |> String.concat " "
+    arr.[0] + " " + tail
+
 /// A wrapper of text and type, mostly for logging purposes
 type DialogueMove =
     {
@@ -170,10 +177,12 @@ type DialogueState =
         CurrentQuestion : Question option
         ///What the client should display now
         Display : string option
+        ///The number of questions we have asked
+        QuestionsAsked : int option
         ///Is the dialogue finished
         Finished : bool option
     } with
-    static member Initialize( clozeItem )( clozeAnswer) = { ClozeItem = clozeItem; ClozeAnswer = clozeAnswer; Questions = None; LastQuestion = None; LastStudentAnswer = None; CurrentFeedback = None; CurrentElaboration = None; CurrentQuestion = None; Display = None; Finished = None }
+    static member Initialize( clozeItem )( clozeAnswer) = { ClozeItem = clozeItem; ClozeAnswer = clozeAnswer; Questions = None; LastQuestion = None; LastStudentAnswer = None; CurrentFeedback = None; CurrentElaboration = None; CurrentQuestion = None; Display = None; QuestionsAsked = None; Finished = None }
     // static member InitializeTest() = DialogueState.Initialize "The supraspinatus is located in the depression above the spine of the scapula on its _______ _______." "posterior surface"
     // static member InitializeTest() = DialogueState.Initialize "Human anatomy and physiology are the studies of the _______ _______ and how it works." "human body"
     // static member InitializeTest() = DialogueState.Initialize """Cells are specialized to take on specific and "necessary responsibilities", and together they maintain an environment within _____ _____ in which they can all live.""" "the body"
@@ -213,7 +222,7 @@ let GetDialogue (state:DialogueState) =
         
         //The cloze in complete sentence form
         let text = System.Text.RegularExpressions.Regex.Replace(state.ClozeItem, "(_ _|_)+", state.ClozeAnswer) //multi word cloze requires _ _ first
- 
+
         //To make promises cleaner, pull them all here; can't use pattern matching without nested promises
         //Prepare for question generation by getting NLP; doing a no-op if not needed (TODO make cleaner?)
         let! daResult = 
@@ -256,11 +265,25 @@ let GetDialogue (state:DialogueState) =
                 //TODO add more sophisticated selection logic
                 let hintOption = questions |> Array.tryFind(fun q -> q.QuestionType = Hint )
                 let prompts = questions |> Array.filter(fun q -> q.QuestionType = Prompt )
-                match state.LastQuestion, hintOption, prompts with
+                // CHANGING FROM HINT FIRST TO PROMPT
+                // match state.LastQuestion, hintOption, prompts with
+                match state.LastQuestion, state.QuestionsAsked, hintOption, prompts with
                 //Initial move, we have a hint, so do hint
-                | None, Some(h), _ -> h |> Some, questions |> Array.filter( fun q -> q <> h )
+                //| None, Some(h), _ -> h |> Some, questions |> Array.filter( fun q -> q <> h )
+                //Initial move, do a prompt if we have any
+                | None, _, _, ps when ps.Length > 0  ->
+                    // Score available prompts according to how much their focus matches the cloze item, so giving a clue
+                    let clozeAnswerSet = state.ClozeAnswer.Split( ' ' ) |> Set.ofArray
+                    let p = ps |> Array.maxBy( fun ap ->
+                        let candidateSet = ap.Focus.Split( ' ' ) |> Set.ofArray
+                        let intersection = Set.intersect candidateSet clozeAnswerSet
+                        intersection.Count
+                    )
+                    p |> Some, questions |> Array.filter( fun q -> q <> p )
                 //Last was hint, we have a prompt, so do prompt
-                | Some(lastQ),_,ps when lastQ.QuestionType = Hint && ps.Length > 0 -> 
+                //| Some(lastQ),_,ps when lastQ.QuestionType = Hint && ps.Length > 0 -> 
+                //We've asked 1 question, we have a prompt, so do prompt
+                | Some(lastQ), Some(qs),_,ps when ps.Length > 0 && qs = 1 -> 
                     // Score available prompts according to how much their focus matches the answer of the last question, so giving a clue
                     let lastSet = lastQ.Answer.Split( ' ' ) |> Set.ofArray
                     let p = ps |> Array.maxBy( fun ap ->
@@ -302,7 +325,9 @@ let GetDialogue (state:DialogueState) =
             let makeElaboration() =
                 let elaboration = [| DialogueMove.GetRandom( ElaborationMarker) ; DialogueMove.Create( text, Elaboration ); DialogueMove.GetRandom(ShiftMarker) |] 
                 //to display elaboration
-                display.AddRange( elaboration |> Array.map( fun e -> e.Text ))
+                //hack, use the first two to handle display lowercasing
+                display.Add( elaboration.[..1] |> Array.map( fun e -> e.Text) |> prefixDiscourseMarker )
+                display.Add(  elaboration.[2].Text)
                 //return structured elaboration
                 elaboration
 
@@ -319,6 +344,14 @@ let GetDialogue (state:DialogueState) =
             match currentQuestionOption,elaborationOption with
             | Some( q ), None -> display.Add( q.Text )
             | _ -> ()
+
+            //After switching to prompt only questions, using a counter to decide when to abort the dialogue
+            let questionsAskedOption =
+                match currentQuestionOption,state.QuestionsAsked with
+                | Some(_),Some(c) -> Some(c+1)
+                | Some(_), None -> Some(1)
+                | None, Some(c) -> Some(c)
+                | _ -> None
 
             //If we have done an elaboration, we have finished
             let finishedOption = 
@@ -340,6 +373,7 @@ let GetDialogue (state:DialogueState) =
                         CurrentElaboration=elaborationOption;
                         CurrentQuestion = currentQuestionOption;
                         Display = display |> String.concat " " |> Some;
+                        QuestionsAsked = questionsAskedOption;
                         Finished = finishedOption
                     })
         else
