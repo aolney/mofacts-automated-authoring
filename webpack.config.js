@@ -67,7 +67,7 @@ module.exports = {
     // to prevent browser caching if code changes
     output: {
         path: resolve(CONFIG.outputDir),
-        filename: isProduction ? '[name].[hash].js' : '[name].js'
+        filename: isProduction ? '[name].[contenthash].js' : '[name].js'
     },
     mode: isProduction ? 'production' : 'development',
     devtool: isProduction ? 'source-map' : 'eval-source-map',
@@ -85,7 +85,7 @@ module.exports = {
     //      - HotModuleReplacementPlugin: Enables hot reloading when code changes without refreshing
     plugins: isProduction ?
         commonPlugins.concat([
-            new MiniCssExtractPlugin({ filename: 'style.[hash].css' }),
+            new MiniCssExtractPlugin({ filename: 'style.[contenthash].css' }),
             new CopyWebpackPlugin(
                 {
                     patterns: [
@@ -100,7 +100,7 @@ module.exports = {
             // BrowserFS globals
             //new webpack.ProvidePlugin({ BrowserFS: 'bfsGlobal', process: 'processGlobal', Buffer: 'bufferGlobal' }),
             new webpack.HotModuleReplacementPlugin(),
-            new webpack.NamedModulesPlugin()
+            // new webpack.NamedModulesPlugin() //outdated v5?
         ]),
     //original version
     resolve: {
@@ -131,13 +131,17 @@ module.exports = {
     //end browserfs configuration
     // Configuration for webpack-dev-server
     devServer: {
-        publicPath: '/',
-        contentBase: resolve(CONFIG.assetsDir),
+        // publicPath: '/',
+        devMiddleware:{
+            publicPath: "/",
+        },
+        // contentBase: resolve(CONFIG.assetsDir),
+        static: resolve(CONFIG.assetsDir),
         //host: '0.0.0.0', //https://stackoverflow.com/questions/26276952/node-js-websocket-error-error-listen-eaddrnotavail-error-listen-eaddrnotavail/26277194#26277194
         port: CONFIG.devServerPort,
         proxy: CONFIG.devServerProxy,
-        hot: true,
-        inline: true
+        // hot: true,
+        // inline: true
     },
     // - fable-loader: transforms F# into JS
     // - babel-loader: transforms JS to old syntax (compatible with old browsers)
