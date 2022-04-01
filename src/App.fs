@@ -64,8 +64,13 @@ type Service =
   | ElaboratedTutorialDialogueState
   | Test
 
+[<StringEnum>]
+type UIMode = Simple | Expert
+
 type Model = 
   {
+    /// UI Mode: simple (get text, generate cloze items in json form) or expert (interface used for testing)
+    Mode : UIMode
     ///Input string to test the service
     InputText : string
     ///Type of service we will call
@@ -96,11 +101,13 @@ type Msg =
     | ClearJson
     | UpdateSentences of string
     | UpdateItems of string
+    | ExpertMode
     // | ErrorResult of int * string
         
 let init () : Model * Cmd<Msg> =
   ( { 
-      InputText = "GitHub makes it easy to scale back on context switching."
+      Mode = UIMode.Simple
+      InputText = "Paste text here"
       Service = SelectCloze
       Status = ""
       JsonResult = ""
@@ -120,8 +127,8 @@ let ParseIntOption s =
 /// Convert a Thoth.Fetch Result into a wrapped string tuple: (status,payload)
 let inline makeServiceResult ( result : Result<'t,'e> ) =
   match result with
-  | Ok(r:'t) -> ServiceResult( "ok", Encode.Auto.toString(4, r ) )
-  | Error(e) -> ServiceResult( "error", e.ToString() ) //could unpack various error types if desired https://thoth-org.github.io/Thoth.Fetch/
+  | Ok(r:'t) -> ServiceResult( "Execution completed!", Encode.Auto.toString(4, r ) )
+  | Error(e) -> ServiceResult( "Error! ", e.ToString() ) //could unpack various error types if desired https://thoth-org.github.io/Thoth.Fetch/
 
 let update msg (model:Model) =
   match msg with
@@ -173,7 +180,7 @@ let update msg (model:Model) =
 
     //we use the status code from the server instead of a separate error handler `Cmd.OfPromise.either`
     ( 
-      {model with Status=""}, cmd
+      {model with Status="Executing, please wait..."}, cmd
     )
   | ServiceResult(code,json)->
 
@@ -224,6 +231,8 @@ let update msg (model:Model) =
     ( { model with DesiredSentences=input}, [] )
   | UpdateItems(input)->
     ( { model with DesiredItems=input}, [] )
+  | ExpertMode ->
+    ( { model with Mode=UIMode.Expert}, [] )
 
 // View
 // ---------------------------------------
@@ -235,7 +244,87 @@ let simpleButton txt action dispatch =
           OnClick (fun _ -> action |> dispatch) ]
     [ str txt ] ]
 
-let view model dispatch =
+let simpleModeView model dispatch = 
+  Section.section [] [
+    Container.container [ Container.IsFluid ] [
+      Heading.h2 [ ] [ str "MoFaCTS Automated Authoring"]
+      Content.content [ ] [
+        p [] [ str "A simple app for creating MoFaCTS cloze items from text. Click on the cat in the corner for more information." ]
+      ]
+      //editing and uploading data
+      Fulma.Columns.columns [] [        
+        Fulma.Column.column [ Column.Width  (Screen.All, Column.IsOneThird )  ] [
+          Label.label [ ] [ str "Input" ]
+          textarea [
+            ClassName "input"
+            Value model.InputText
+            Size 100.0
+            Style [
+                Width "100%"
+                Height "150px"
+            ] 
+            OnChange (fun ev ->  !!ev.target?value |> UpdateText|> dispatch )
+          ] []
+          // The only service in simple mode is Get Select Cloze
+                // select [ DefaultValue model.Service ; OnChange (fun ev  -> ServiceChange( !!ev.Value ) |> dispatch) ] [ 
+                //   option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
+                
+          
+          div [ ] [
+            Label.label [ ] [ str "Optional Desired Sentences" ] 
+            Input.text [
+                  Input.Color IsPrimary
+                  Input.IsRounded
+                  Input.Value ( model.DesiredSentences.ToString() )
+                  Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateSentences|> dispatch ) ]
+                ]
+            Label.label [ ] [ str "Optional Desired Items" ] 
+            Input.text [
+                  Input.Color IsPrimary
+                  Input.IsRounded
+                  Input.Value ( model.DesiredItems.ToString() )
+                  Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateItems|> dispatch ) ]
+                ]
+            ]
+
+        ]
+        Fulma.Column.column [ Column.Width (Screen.All, Column.IsOneThird) ] [
+          Label.label [ ] [ str "Run" ]
+          div [ ClassName "block" ] [
+          Button.button [ 
+            Button.Color IsPrimary
+            Button.OnClick (fun _ -> dispatch CallService )
+            ] [ str "Generate items" ]
+          ]
+          Text.p [ Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Left) ] ] [
+            str model.Status
+          ]
+          if model.Status = "Execution completed!" then
+            div [ ClassName "block" ] [
+            Button.button [ 
+              Button.Color IsPrimary
+              Button.OnClick (fun _ -> dispatch DownloadJson )
+              ] [ str "Download JSON" ]
+            ]
+        ]
+
+        Fulma.Column.column [ 
+          Column.Modifiers [  
+            // Fulma.Modifier.FlexDirection FlexDirection.Column; 
+            Fulma.Modifier.FlexJustifyContent FlexJustifyContent.SpaceBetween 
+            ];  
+          Column.Width (Screen.All, Column.IsOneThird) ] [    
+          Button.button [ 
+            Button.Modifiers [ Fulma.Modifier.Spacing (Spacing.MarginTop, Spacing.IsAuto ) ]
+            Button.Color IsDanger
+            Button.OnClick (fun _ -> dispatch ExpertMode )
+            ] [ str "Expert mode" ]
+        ]
+      ]
+    ]
+  ]
+
+let expertModeView model dispatch = 
   Section.section [] [
     //spinner defined in sass
     //div [ ClassName "loading"; Hidden ( model.Mode = Mode.Coding || model.Mode = Mode.TextEdit )  ] []
@@ -316,7 +405,7 @@ let view model dispatch =
                 //Key allows us to reload a file after clearing it
                 Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadJsonFile !!ev.target?files  |> dispatch ) ] 
                 ] [ 
-                Fulma.File.label [ ] [ 
+                Fulma.File.name [ ] [ 
                   Fulma.File.input [ Props [ Accept ".json" ]]
                   Fulma.File.cta [ ] [ 
                     Fulma.File.icon [ ] [ 
@@ -324,7 +413,7 @@ let view model dispatch =
                         Fa.i [ Fa.Solid.Upload ] []
                         ]
                     ]
-                    Fulma.File.label [ ] [ str "Load JSON" ] ]
+                    Fulma.File.name [ ] [ str "Load JSON" ] ]
                   Fulma.File.name [ ] [ str (match model.JsonInput with | Some(_) -> "Status: Loaded" | None -> "Status: Empty" ) ] 
                   Button.button [ 
                     Button.Color IsPrimary
@@ -386,6 +475,11 @@ let view model dispatch =
       ]
     ]  
   ]
+
+let view model dispatch =
+  match model.Mode with
+  | UIMode.Simple -> simpleModeView model dispatch
+  | UIMode.Expert -> expertModeView model dispatch
 
 // App
 Program.mkProgram init update view

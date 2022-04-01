@@ -1,0 +1,51 @@
+@import "~bulma/sass/utilities/initial-variables";
+@import "~bulma/sass/utilities/functions";
+
+$fa-font-path: "~@fortawesome/fontawesome-free/webfonts/";
+@import '~@fortawesome/fontawesome-free/scss/fontawesome.scss';
+@import "~@fortawesome/fontawesome-free/scss/solid.scss";
+@import "~@fortawesome/fontawesome-free/scss/regular.scss";
+@import "~@fortawesome/fontawesome-free/scss/brands.scss";
+
+@import '~bulma/bulma.sass';
+// @import '~bulma-pageloader/dist/css/bulma-pageloader.sass';
+
+// Colors
+$purple: #7a325d;
+$primary: $purple;
+$black: #202020;
+
+.loading {
+  position: fixed;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  background: white;
+  text-align: center;
+  background-image: url('../public/img/loading.gif');
+  background-repeat: no-repeat;
+  background-position: center center;
+}
+
+.navbar-bg {
+  background-color: $black;
+  .nav {
+    background-color: $black;
+  }
+  .title {
+    color: #686868;
+    font-weight: 600;
+  }
+}
+
+.twitter {
+  color: #55acee !important; // Override bulma
+  border-color: #55acee;
+}
+
+.github {
+  color: $black !important; // Override bulma
+  border-color: $black;
+}
