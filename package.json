@@ -8,7 +8,7 @@
   "scripts": {
     "start": "webpack-dev-server",
     "publish": "gh-pages -d deploy",
-    "deploy": "webpack -p",
+    "deploy": "webpack --mode production",
     "node-build": "fable-splitter src -o node-build --commonjs",
     "node-build-with-sourcemaps": "fable-splitter src -o node-build --commonjs -c splitter.config.js",
     "pretest": "fable-splitter tests -o test-build --commonjs",

@@ -588,6 +588,14 @@ let RemoveOverlappingClozables (clozables : Clozable[] ) =
     //
     clozablesOut.ToArray()
 
+/// Spaceless equality:  Removes all spaces from text strings, e.g. "the car" -> "thecar", to resolve string comparision issues where only the space is different
+let se( text1 : string ) ( text2 : string ) =
+    text1.Replace(" ","") = text2.Replace(" ","")
+
+/// Spaceless INequality:  Removes all spaces from text strings, e.g. "the car" -> "thecar", to resolve string comparision issues where only the space is different
+let nse( text1 : string ) ( text2 : string ) =
+    text1.Replace(" ","") <> text2.Replace(" ","")
+
 
 /// Perform item transformations (coref resolution/paraphrase) as applicable
 /// Store these alternatives as tags
@@ -634,24 +642,36 @@ let MakeItemWithTranformations (sa:SentenceAnnotation) (cl:Clozable) =
             // |> String.mapi( fun i c -> match i with | 0 -> (Char.ToUpper(c)) | _ -> c) //uppercase first letter as needed
 
         //handle cases for transformations
-        //all equal, no transformations, purge existing transformation tags
-        if cr = sa.sen && pa = sa.sen then
-            item, cloze, tags
-        //pa only, pa item succeeded, make item with pa tag
-        elif cr = sa.sen && pa <> sa.sen && pa <> paItem then
-            item, cloze, Tag.ClozeParaphraseTransformation(paItem)::tags
-        //cr only, cr item succeeded, make item with cr tag
-        elif cr <> sa.sen && pa = sa.sen && cr <> crItem then
-            item, cloze, Tag.ClozeCorefTransformation(crItem)::Tag.CorrectResponseCorefTransformation(crCloze)::tags
-        //pa and cr, make items for both
-        elif cr <> sa.sen && pa <> sa.sen then
-            let tempTags = tags |> ResizeArray
-            if pa <> paItem then tempTags.Add( Tag.ClozeParaphraseTransformation(paItem) )
-            if cr <> crItem then tempTags.Add( Tag.ClozeCorefTransformation(crItem) ); tempTags.Add( Tag.CorrectResponseCorefTransformation(crCloze) )
-            item, cloze, tempTags |> Seq.toList
-        //something went wrong, keep basic item and purge transformation tags
-        else
-            item, cloze, tags
+        //simplified version
+        let tempTags = tags |> ResizeArray
+        // coref transformation is different from original and we can make an item
+        if (nse cr sa.sen) && (nse cr crItem) then
+            tempTags.Add( Tag.ClozeCorefTransformation(crItem) ); tempTags.Add( Tag.CorrectResponseCorefTransformation(crCloze) )
+        // paraphrase transformation is different from original and we can make an item
+        if (nse pa sa.sen) && (nse pa paItem) then
+            tempTags.Add( Tag.ClozeParaphraseTransformation(paItem) )
+
+        //return clean transformation tags
+        item, cloze, tempTags |> Seq.toList
+
+        // //all equal, no transformations, purge existing transformation tags
+        // if cr = sa.sen && pa = sa.sen then
+        //     item, cloze, tags
+        // //pa only, pa item succeeded, make item with pa tag
+        // elif cr = sa.sen && pa <> sa.sen && pa <> paItem then
+        //     item, cloze, Tag.ClozeParaphraseTransformation(paItem)::tags
+        // //cr only, cr item succeeded, make item with cr tag
+        // elif cr <> sa.sen && pa = sa.sen && cr <> crItem then
+        //     item, cloze, Tag.ClozeCorefTransformation(crItem)::Tag.CorrectResponseCorefTransformation(crCloze)::tags
+        // //pa and cr, make items for both
+        // elif cr <> sa.sen && pa <> sa.sen then
+        //     let tempTags = tags |> ResizeArray
+        //     if pa <> paItem then tempTags.Add( Tag.ClozeParaphraseTransformation(paItem) )
+        //     if cr <> crItem then tempTags.Add( Tag.ClozeCorefTransformation(crItem) ); tempTags.Add( Tag.CorrectResponseCorefTransformation(crCloze) )
+        //     item, cloze, tempTags |> Seq.toList
+        // //something went wrong, keep basic item and purge transformation tags
+        // else
+        //     item, cloze, tags
     //partial or total transformation failure, keep basic item and purge transformation tags
     | _ , _ -> item, cloze, tags
 
@@ -702,6 +722,7 @@ let GetAcronymMap input =
             Map.empty
     //
     acronymMap |> toJson
+
 
 /// Returns select clozables given a target number by ranking clozables and returning top ranked.
 /// Since target numbers may be impossible to satisfy, does not guarantee returning the target quantities.
@@ -864,6 +885,38 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
                     )
                 )
             return Ok( {sentences=sentences.ToArray();clozes=clozes.ToArray()} )
+        | Error(e) -> 
+            return Error(e)
+    }
+
+/// Designed for Phil to test; based around the node code for generating stims
+// var parse = fs.readFileSync(filename, 'utf8');
+// var sections = fs.readFileSync( filename.replace(/parse/g,"sectionlist"), 'utf8');
+// var timeout = 4000 //delay buffer
+// var sentenceCount = ClozeAPI.EstimateDesiredSentencesFromPercentage(parse,parseFloat(percentage))
+// var itemCount = sentenceCount * 2
+// ClozeAPI.GetSelectCloze(parse,sentenceCount,itemCount,false,sections,"").then( (result) => {
+let GetSelectClozePercentage (percentage : float) ( stringArrayJsonOption : string option) (nlpJsonOption: string option) ( inputText : string )  =
+    promise {
+        //Get a DocumentAnnotation
+        // let! nlpResult = GetNLP stringArrayJsonOption inputText
+        //Get a DocumentAnnotation if one wasn't passed in
+        let! nlpResult = 
+            match nlpJsonOption with
+            | Some(nlpJson) -> nlpJson |> ofJson<DocumentAnnotation> |> Promisify 
+            | None -> GetNLP stringArrayJsonOption inputText 
+
+        match nlpResult with
+        | Ok(da) ->
+            let sentenceCount = int((da.sentences.Length |> float) * percentage) 
+            let itemCount = sentenceCount * 2
+            let! clozeResult= GetSelectCloze (da |> toJson |> Some) (sentenceCount |> Some) (itemCount |> Some) true stringArrayJsonOption inputText
+            // let clozables = da |> GetClozables |> Array.map( fun ra -> ra.ToArray() )
+            match clozeResult with
+            | Ok(clozeAPI) ->
+                return Ok( clozeAPI )
+            | Error(e) -> 
+                return Error(e)
         | Error(e) -> 
             return Error(e)
     }

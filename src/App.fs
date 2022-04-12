@@ -43,6 +43,7 @@ type Service =
   | NLP 
   | AllCloze
   | SelectCloze
+  | SelectClozePercentage
   | Triples
   | Lemma //assumes UPOS noun
   | Inflection //assumes Penn NNS
@@ -81,12 +82,20 @@ type Model =
     JsonResult : string
     ///Json loaded from file, e.g. a parse
     JsonInput : string option
+    ///Json file name
+    JsonFileName : string option
     ///Desired # sentences for external API
     DesiredSentences : string
     ///Desired # items for external API
     DesiredItems : string
     //To calculate word difficulty we need to return additional data from the GetSelectCloze API call
     // Trace : bool
+    Percentage : string
+    //for simple mode only
+    ParseJson : string option
+    ParseFileName : string option
+    // Paraphrases : string[] option
+    ParaphraseFileName : string option
   }
 
 type Msg =
@@ -101,28 +110,43 @@ type Msg =
     | ClearJson
     | UpdateSentences of string
     | UpdateItems of string
+    | UpdatePercentage of string
     | ExpertMode
+    //for simple mode only
+    | LoadJsonParseFile of Browser.Types.FileList
+    | SetParseJson of string
+    | ClearParseJson
+    | LoadParaphraseFile of Browser.Types.FileList
+    | SetParaphrases of string
+    // | ClearParaphrases
     // | ErrorResult of int * string
         
 let init () : Model * Cmd<Msg> =
   ( { 
       Mode = UIMode.Simple
-      InputText = "Paste text here"
-      Service = SelectCloze
+      InputText = "Paste text here or leave blank and upload JSON list of sections."
+      Service = SelectClozePercentage
       Status = ""
       JsonResult = ""
       JsonInput = None
+      JsonFileName = None
       DesiredSentences = ""
       DesiredItems = ""
+      Percentage = "0.05"
+      //for simple mode only
+      ParseJson = None
+      ParseFileName = None
+      // Paraphrases = None
+      ParaphraseFileName = None
     }, [] )
 
 
 // Update
 // ---------------------------------------
 let ParseIntOption s =
-   match System.Int32.TryParse(s) with
-   | (true,int) -> Some(int)
-   | _ -> None
+  match System.Int32.TryParse(s) with
+  | (true,int) -> Some(int)
+  | _ -> None
 
 /// Convert a Thoth.Fetch Result into a wrapped string tuple: (status,payload)
 let inline makeServiceResult ( result : Result<'t,'e> ) =
@@ -130,15 +154,15 @@ let inline makeServiceResult ( result : Result<'t,'e> ) =
   | Ok(r:'t) -> ServiceResult( "Execution completed!", Encode.Auto.toString(4, r ) )
   | Error(e) -> ServiceResult( "Error! ", e.ToString() ) //could unpack various error types if desired https://thoth-org.github.io/Thoth.Fetch/
 
+/// Assumes all services accept a single input; additional arguments must be curried before calling
+let makeCmd serviceCall input resultWrapper = 
+  Cmd.OfPromise.perform serviceCall input ( fun result -> result |> resultWrapper ) 
+
 let update msg (model:Model) =
   match msg with
   | UpdateText(input) ->
     ( {model with InputText=input}, [])
   | CallService ->
-
-    /// Assumes all services accept a single input; additional arguments must be curried before calling
-    let makeCmd serviceCall input resultWrapper = 
-      Cmd.OfPromise.perform serviceCall input ( fun result -> result |> resultWrapper ) 
 
     /// Because different services emit different types, but all must resolve to the same type here, uses functions above to simplify construction
     let cmd =
@@ -155,6 +179,7 @@ let update msg (model:Model) =
       | AllCloze -> makeCmd (ClozeAPI.GetAllCloze model.JsonInput None) model.InputText makeServiceResult
       // Note we pass no chunks; input is used as a singleton chunk instead; "true" provides trace information
       | SelectCloze -> makeCmd (ClozeAPI.GetSelectCloze model.JsonInput (ParseIntOption <| model.DesiredSentences) (ParseIntOption <| model.DesiredItems) true None ) model.InputText makeServiceResult
+      | SelectClozePercentage -> makeCmd (ClozeAPI.GetSelectClozePercentage ( model.Percentage |> float) model.JsonInput model.ParseJson) model.InputText makeServiceResult
       // Note we pass no chunks; input is used as a singleton chunk instead
       | Triples -> makeCmd (Triples.GetTriples model.JsonInput None) model.InputText makeServiceResult  
       | DefinitionalFeedback -> makeCmd (DefinitionalFeedback.HarnessGenerateFeedback) model.InputText makeServiceResult
@@ -222,7 +247,7 @@ let update msg (model:Model) =
         let fileReader = Browser.Dom.FileReader.Create ()
         fileReader.onload <- fun _ -> fileReader.result |> unbox<string> |> SetJson |> dispatch
         fileReader.readAsText fileList.[0]
-      ( model, [fileReadCommand] )
+      ( {model with JsonFileName = Some(fileList.[0].name)}, [fileReadCommand] )
   | SetJson(json) ->
     ( { model with JsonInput = Some(json)}, [])
   | ClearJson ->
@@ -231,8 +256,31 @@ let update msg (model:Model) =
     ( { model with DesiredSentences=input}, [] )
   | UpdateItems(input)->
     ( { model with DesiredItems=input}, [] )
+  | UpdatePercentage(input)->
+    ( { model with Percentage=input}, [] )
   | ExpertMode ->
     ( { model with Mode=UIMode.Expert}, [] )
+  //for simple mode only
+  | LoadJsonParseFile(fileList) -> 
+    let fileReadCommand dispatch =
+      let fileReader = Browser.Dom.FileReader.Create ()
+      fileReader.onload <- fun _ -> fileReader.result |> unbox<string> |> SetParseJson |> dispatch
+      fileReader.readAsText fileList.[0]
+    ( {model with ParseFileName = Some(fileList.[0].name)}, [fileReadCommand] )
+  | SetParseJson(json) ->
+    ( { model with ParseJson = Some(json)}, [])
+  | ClearParseJson ->
+    ( { model with ParseJson = None}, [] )
+  | LoadParaphraseFile(fileList) -> 
+    let fileReadCommand dispatch =
+      let fileReader = Browser.Dom.FileReader.Create ()
+      fileReader.onload <- fun _ -> fileReader.result |> unbox<string> |> SetParaphrases |> dispatch
+      fileReader.readAsText fileList.[0]
+    ( {model with ParaphraseFileName = Some(fileList.[0].name)}, [fileReadCommand] )
+  | SetParaphrases(text) ->
+    let loadParaphrases = makeCmd Paraphrase.InitializeParaphraseCache text makeServiceResult
+    ( model, loadParaphrases)
+
 
 // View
 // ---------------------------------------
@@ -270,24 +318,109 @@ let simpleModeView model dispatch =
                 //   option [ Value Service.SelectCloze ] [ str "Get Select Cloze" ]
                 
           
-          div [ ] [
-            Label.label [ ] [ str "Optional Desired Sentences" ] 
+          div [ ClassName "block" ] [
+            Label.label [ ] [ str "Proportion Sentences to Use [0,1]" ] 
             Input.text [
                   Input.Color IsPrimary
                   Input.IsRounded
-                  Input.Value ( model.DesiredSentences.ToString() )
-                  Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateSentences|> dispatch ) ]
+                  Input.Value ( model.Percentage.ToString() )
+                  Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdatePercentage|> dispatch ) ]
                 ]
-            Label.label [ ] [ str "Optional Desired Items" ] 
-            Input.text [
-                  Input.Color IsPrimary
-                  Input.IsRounded
-                  Input.Value ( model.DesiredItems.ToString() )
-                  Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateItems|> dispatch ) ]
+            // Label.label [ ] [ str "Optional Desired Sentences" ] 
+            // Input.text [
+            //       Input.Color IsPrimary
+            //       Input.IsRounded
+            //       Input.Value ( model.DesiredSentences.ToString() )
+            //       Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateSentences|> dispatch ) ]
+            //     ]
+            // Label.label [ ] [ str "Optional Desired Items" ] 
+            // Input.text [
+            //       Input.Color IsPrimary
+            //       Input.IsRounded
+            //       Input.Value ( model.DesiredItems.ToString() )
+            //       Input.Props [ OnChange (fun ev ->  !!ev.target?value |> UpdateItems|> dispatch ) ]
+            //     ]
+            ]
+            
+          // JSON list of sections
+          div [ ClassName "block" ] [
+            Label.label [ ] [ str "Optional JSON list of sections (list of strings)" ]
+            Fulma.File.file [ 
+              Fulma.File.HasName 
+              Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadJsonFile !!ev.target?files  |> dispatch ) ] 
+              ] [ 
+              Fulma.File.Label.label [ ] [ 
+                Fulma.File.input [ Props [ Accept ".json" ]]
+                Fulma.File.cta [ ] [ 
+                  Fulma.File.icon [ ] [ 
+                    Fulma.Icon.icon [ ] [ 
+                      Fa.i [ Fa.Solid.Upload ] [ ] 
+                    ]
+                  ]
+                  Fulma.File.Label.span [ ] [ 
+                    str "Choose a file..." 
+                  ] 
                 ]
+                Fulma.File.name [ ] [ 
+                  str (match model.JsonFileName with | Some(name) -> name | None -> "" )
+                ]
+              ] 
+            ]
+          ]
+        
+          // Parse
+          div [ ClassName "block" ] [
+              Label.label [ ] [ str "Optional parse JSON" ]
+              Fulma.File.file [ 
+                Fulma.File.HasName 
+                Fulma.File.Props [ Key ( if model.ParseJson.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadJsonParseFile !!ev.target?files  |> dispatch ) ] 
+                ] [ 
+                Fulma.File.Label.label [ ] [ 
+                  Fulma.File.input [ Props [ Accept ".json" ]]
+                  Fulma.File.cta [ ] [ 
+                    Fulma.File.icon [ ] [ 
+                      Fulma.Icon.icon [ ] [ 
+                        Fa.i [ Fa.Solid.Upload ] [ ] 
+                      ]
+                    ]
+                    Fulma.File.Label.span [ ] [ 
+                      str "Choose a file..." 
+                    ] 
+                  ]
+                  Fulma.File.name [ ] [ 
+                    str (match model.ParseFileName with | Some(name) -> name | None -> "" )
+                  ]
+                ] 
+              ]
             ]
 
-        ]
+          //Paraphrase
+          div [ ClassName "block" ] [
+            Label.label [ ] [ str "Optional paraphrases (tsv)" ]
+            Fulma.File.file [ 
+              Fulma.File.HasName 
+              Fulma.File.Props [ Key ( if model.ParaphraseFileName.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadParaphraseFile !!ev.target?files  |> dispatch ) ] 
+              ] [ 
+              Fulma.File.Label.label [ ] [ 
+                Fulma.File.input [ Props [ Accept ".tsv" ]]
+                Fulma.File.cta [ ] [ 
+                  Fulma.File.icon [ ] [ 
+                    Fulma.Icon.icon [ ] [ 
+                      Fa.i [ Fa.Solid.Upload ] [ ] 
+                    ]
+                  ]
+                  Fulma.File.Label.span [ ] [ 
+                    str "Choose a file..." 
+                  ] 
+                ]
+                Fulma.File.name [ ] [ 
+                  str (match model.ParaphraseFileName with | Some(name) -> name | None -> "" )
+                ]
+              ] 
+            ]
+          ]
+
+        ] //column
         Fulma.Column.column [ Column.Width (Screen.All, Column.IsOneThird) ] [
           Label.label [ ] [ str "Run" ]
           div [ ClassName "block" ] [
