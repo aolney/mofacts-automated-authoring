@@ -124,7 +124,7 @@ type Msg =
 let init () : Model * Cmd<Msg> =
   ( { 
       Mode = UIMode.Simple
-      InputText = "Paste text here or leave blank and upload JSON list of sections."
+      InputText = "Paste text here or leave blank and upload JSON respective JSON files."
       Service = SelectClozePercentage
       Status = ""
       JsonResult = ""
@@ -151,12 +151,17 @@ let ParseIntOption s =
 /// Convert a Thoth.Fetch Result into a wrapped string tuple: (status,payload)
 let inline makeServiceResult ( result : Result<'t,'e> ) =
   match result with
-  | Ok(r:'t) -> ServiceResult( "Execution completed!", Encode.Auto.toString(4, r ) )
+  | Ok(r:'t) -> ServiceResult(  "Execution completed!", Encode.Auto.toString(4, r ) )
   | Error(e) -> ServiceResult( "Error! ", e.ToString() ) //could unpack various error types if desired https://thoth-org.github.io/Thoth.Fetch/
 
 /// Assumes all services accept a single input; additional arguments must be curried before calling
 let makeCmd serviceCall input resultWrapper = 
-  Cmd.OfPromise.perform serviceCall input ( fun result -> result |> resultWrapper ) 
+  // let statusMessage = 
+  //   if serviceCall <> Paraphrase.InitializeParaphraseCache then
+  //     "Execution completed!"
+  //   else
+  //     ""
+  Cmd.OfPromise.perform serviceCall input ( fun result -> result |> resultWrapper) 
 
 let update msg (model:Model) =
   match msg with
@@ -210,7 +215,8 @@ let update msg (model:Model) =
   | ServiceResult(code,json)->
 
     //alert beep
-    beep();beep();beep()
+    if json <> "null" then
+      beep();beep();beep() 
 
     //for debug: chrome is freezing up, so trying to dump non-essential fields from the model
     // ( {model with InputText=""; JsonInput=None; JsonResult=json; Status=code.ToString()}, [])
@@ -430,9 +436,9 @@ let simpleModeView model dispatch =
             ] [ str "Generate items" ]
           ]
           Text.p [ Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Left) ] ] [
-            str model.Status
+            str ( if model.JsonResult <> "null" then model.Status else "" )
           ]
-          if model.Status = "Execution completed!" then
+          if model.Status = "Execution completed!"  && model.JsonResult <> "null" then
             div [ ClassName "block" ] [
             Button.button [ 
               Button.Color IsPrimary
@@ -532,28 +538,54 @@ let expertModeView model dispatch =
                         model.Service <> Service.InitializeParaphraseCache &&
                         model.Service <> Service.Test
                         )] [
-            Label.label [ ] [ str "Optional JSON (e.g. parse)" ]
-            Fulma.File.file [ 
+            // Label.label [ ] [ str "Optional JSON (e.g. parse)" ]
+            // Fulma.File.file [ 
+            //     Fulma.File.HasName 
+            //     //Key allows us to reload a file after clearing it
+            //     Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadJsonFile !!ev.target?files  |> dispatch ) ] 
+            //     ] [ 
+            //     Fulma.File.name [ ] [ 
+            //       Fulma.File.input [ Props [ Accept ".json" ]]
+            //       Fulma.File.cta [ ] [ 
+            //         Fulma.File.icon [ ] [ 
+            //           Icon.icon [ ] [ 
+            //             Fa.i [ Fa.Solid.Upload ] []
+            //             ]
+            //         ]
+            //         Fulma.File.name [ ] [ str "Load JSON" ] ]
+            //       Fulma.File.name [ ] [ str (match model.JsonInput with | Some(_) -> "Status: Loaded" | None -> "Status: Empty" ) ] 
+            //       Button.button [ 
+            //         Button.Color IsPrimary
+            //         Button.OnClick (fun _ -> dispatch ClearJson )
+            //         ] [ str "Clear JSON" ]
+            //     ] 
+            //   ]
+            //
+            div [ ClassName "block" ] [
+              Label.label [ ] [ str "Optional JSON (e.g. parse)" ]
+              Fulma.File.file [ 
                 Fulma.File.HasName 
-                //Key allows us to reload a file after clearing it
                 Fulma.File.Props [ Key ( if model.JsonInput.IsSome then "loaded" else "empty"); OnChange (fun ev ->  LoadJsonFile !!ev.target?files  |> dispatch ) ] 
                 ] [ 
-                Fulma.File.name [ ] [ 
-                  Fulma.File.input [ Props [ Accept ".json" ]]
+                Fulma.File.Label.label [ ] [ 
+                  Fulma.File.input [ Props [ Accept ".json,.tsv" ]]
                   Fulma.File.cta [ ] [ 
                     Fulma.File.icon [ ] [ 
-                      Icon.icon [ ] [ 
-                        Fa.i [ Fa.Solid.Upload ] []
-                        ]
+                      Fulma.Icon.icon [ ] [ 
+                        Fa.i [ Fa.Solid.Upload ] [ ] 
+                      ]
                     ]
-                    Fulma.File.name [ ] [ str "Load JSON" ] ]
-                  Fulma.File.name [ ] [ str (match model.JsonInput with | Some(_) -> "Status: Loaded" | None -> "Status: Empty" ) ] 
-                  Button.button [ 
-                    Button.Color IsPrimary
-                    Button.OnClick (fun _ -> dispatch ClearJson )
-                    ] [ str "Clear JSON" ]
+                    Fulma.File.Label.span [ ] [ 
+                      str "Choose a file..." 
+                    ] 
+                  ]
+                  Fulma.File.name [ ] [ 
+                    str (match model.JsonFileName with | Some(name) -> name | None -> "" )
+                  ]
                 ] 
-              ] 
+              ]
+            ]
+              // 
           ]
           div [ Hidden ( model.Service <> Service.SelectCloze ) ] [
             Label.label [ ] [ str "Optional Desired Sentences" ] 
