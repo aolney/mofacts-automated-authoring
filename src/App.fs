@@ -470,7 +470,7 @@ let expertModeView model dispatch =
     Container.container [ Container.IsFluid ] [
       Heading.h2 [ ] [ str "MoFaCTS Automated Authoring"]
       Content.content [ ] [
-        p [] [ str "This is a simple app for developing automated authoring components for MoFaCTS. Click on the cat in the corner for more information." ]
+        p [] [ str "Expert mode is an interactive test suite for developing automated authoring components for MoFaCTS. It is not intended for general use. Click on the cat in the corner for more information." ]
       ]
       //editing and uploading data
       Fulma.Columns.columns [] [        
