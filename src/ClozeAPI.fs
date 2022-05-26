@@ -10,13 +10,15 @@ open Thoth.Json //for Json; might be cleaner way
 open AllenNLP
 
 // Domain model
+// stimulusId can be used to replace clozeId and clusterId to replace itemId. 
+// itemId is used to represent the id as it is in the database so I think stimulusId would be more accurate.
 
 //-- Public ------------------------------
 ///Public sentence component of an item
 type SentenceAPI =
   {
     sentence :  string
-    itemId : int
+    clusterId : int
     hasCloze : bool
   }
 
@@ -24,8 +26,8 @@ type SentenceAPI =
 type ClozableAPI =
   {
     cloze : string
+    clusterId : int
     itemId : int
-    clozeId : int
     correctResponse : string
     /// Tags we can use for cluster assignment
     tags : obj //the idea right now is to make this an anonymous record since the devs want an object rather than a list of attributes
@@ -73,6 +75,10 @@ type Tag =
     | ClozeParaphraseTransformation of string
     /// Transformations source sentence has undergone to make cloze item
     | Transformations of string list
+    /// Id of cluster (sentence); Phil requests this as tag in new API
+    | ClusterId of int
+    /// Id of item (cloze); Phil requests this as tag in new API
+    | StimulusId of int
     /// Debug information
     | Trace of string
     /// Mark deprecated tags that may still be in parse
@@ -126,6 +132,95 @@ type InternalAPI =
         sentences : SentenceAnnotation[]
         coreference : Coreference
         clozables : Clozable[][]
+    }
+
+/// 05 2022 Phil requested output of full stim file rather than original API
+type MofactsResponse0522 =
+    {
+        correctResponse : string 
+    }
+type MofactsDisplay0522 =
+    {
+        clozeStimulus : string 
+    }
+type MofactsStim0522 =
+    {
+        response: MofactsResponse0522
+        display: MofactsDisplay0522
+        parameter: string
+        tags : obj
+    }
+type MofactsCluster0522 =
+    {
+        stims : MofactsStim0522[]
+    }
+type MofactsSetspec0522 =
+    {
+        clusters : MofactsCluster0522[]
+    }
+type MofactsStimFile0522 =
+    {
+        setspec : MofactsSetspec0522
+    }
+
+[<Emit("new Map(Object.entries($0))")>]
+let pojoToDictionary  (p:obj)  :System.Collections.Generic.Dictionary<string,obj> = jsNative
+
+[<Emit("Object.fromEntries($0)")>]
+let dictionaryToPojo  (p:System.Collections.Generic.Dictionary<string,obj>)  : obj= jsNative
+
+
+let PublicApiToStimFile (pa : ClozeAPI) =
+    let stimFromClozableAPI (i:ClozableAPI) (display: string) response (addTags ) (deleteTags : string [])=
+        // i.tags?stimulusId <- i.itemId
+        // i.tags?clusterId <- iti.clusterId
+        //tags were originally Tag list, but keyValueList has already collapsed to a pojo
+        //so we cast to a dictionary, update the tags, and collapse to pojo again
+        let newTags = pojoToDictionary i.tags
+        newTags.Add("stimulusId", display + ":" + response |> hash  )
+        newTags.Add("clusterId",i.clusterId)
+        for (k,v) in addTags do
+            if newTags.ContainsKey(k) then 
+                newTags.[k] <- v
+            else
+                newTags.Add(k,v) |> ignore
+        for k in deleteTags do
+            newTags.Remove(k) |> ignore
+        {
+            response= { correctResponse=response }
+            display= {clozeStimulus= display}
+            parameter= "0,.70"
+            tags = newTags |> dictionaryToPojo
+        }
+    /// group close by sentence,  each group is a cluster
+    let clusters = pa.clozes |> Array.groupBy(fun i -> i.clusterId)
+    /// for each cluster form stims
+    let clusterRecords = 
+        clusters
+        |>  Array.map(fun (_,arr )->
+            let stims = 
+                arr |> Array.collect(fun i -> 
+                    let temp  = ResizeArray()
+                    //base cloze, remove transformation tags
+                    let cloze =  stimFromClozableAPI i i.cloze i.correctResponse [|("transformation","none")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
+                    temp.Add(cloze )
+                    //paraphrase if it exists; add indicator tag and remove other transformation tags
+                    if i.tags?clozeParaphraseTransformation <> null then
+                        let paraphrase =stimFromClozableAPI i i.tags?clozeParaphraseTransformation i.correctResponse [|("transformation","paraphrase")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
+                        temp.Add( paraphrase)
+                    //coreference if it exists;  add indicator tag and remove other transformation tags
+                    if i.tags?clozeCorefTransformation <> null then
+                        let coref = stimFromClozableAPI i i.tags?clozeCorefTransformation i.tags?correctResponseCorefTransformation  [|("transformation","coreference")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
+                        temp.Add( coref )
+                    temp.ToArray()
+                )
+            { stims = stims}
+        )
+    //
+    {
+        setspec = {
+            clusters= clusterRecords
+        }
     }
 
 ///Based on the Heart Study
@@ -511,13 +606,13 @@ let GetAllClozeLukeFormat20201218 (nlpJsonOption: string option) ( stringArrayJs
                                 | None -> cloze
 
                             if sentence <> cr then
-                                {|Sentence=cr; Cloze=crCloze ; itemId = hash sa; clozeId = hash cloze; OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
+                                {|Sentence=cr; Cloze=crCloze ; clusterId = hash sa; itemId = hash cloze; OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
                             else
-                                {|Sentence=sentence; Cloze=cl.words |> String.concat " "; itemId = hash sa; clozeId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
+                                {|Sentence=sentence; Cloze=cl.words |> String.concat " "; clusterId = hash sa; itemId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
                                 
                         //no coref resolution
                         | _ -> 
-                            {|Sentence=sentence; Cloze=cl.words |> String.concat " "; itemId = hash sa; clozeId = hash cloze; OriginalSentence=sentence; Tags=cl.tags @ cl.trace |} 
+                            {|Sentence=sentence; Cloze=cl.words |> String.concat " "; clusterId = hash sa; itemId = hash cloze; OriginalSentence=sentence; Tags=cl.tags @ cl.trace |} 
                     )
                 )
             
@@ -555,7 +650,7 @@ let GetAllClozeForHumanEvaluation2021061121 (nlpJsonOption: string option) ( str
                     |> Array.map( fun cl -> 
                         let cloze = cl.words |> String.concat " "
                         let sentence = sa.sen |> AllenNLP.removePrePunctuationSpaces
-                        {|SentenceWeight=totalWeight; Chains=chainsLengthTwoOrMore; ClozeProbability=cl.prob; Sentence=sentence; SentenceIndex=i; ClozeStart=cl.start; ClozeStop=cl.stop; Cloze=cloze; itemId = hash sa; clozeId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
+                        {|SentenceWeight=totalWeight; Chains=chainsLengthTwoOrMore; ClozeProbability=cl.prob; Sentence=sentence; SentenceIndex=i; ClozeStart=cl.start; ClozeStop=cl.stop; Cloze=cloze; clusterId = hash sa; itemId = hash cloze;  OriginalSentence=sentence; Tags=cl.tags @ cl.trace  |}
                     )
                 )
             
@@ -851,9 +946,9 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
             allCloze.sentences
             |> Seq.iter( fun sa ->
                 match allClozableMap.TryFind(sa) with
-                | None -> sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = false} )
+                | None -> sentences.Add( { sentence = sa.sen; clusterId = (hash sa); hasCloze = false} )
                 | Some(clozables) -> 
-                    sentences.Add( { sentence = sa.sen; itemId = (hash sa); hasCloze = true} )
+                    sentences.Add( { sentence = sa.sen; clusterId = (hash sa); hasCloze = true} )
                     clozables |> Seq.iter( fun cl -> 
                         // //append the weight group to our tags and convert the list of tags into an object literal
                         // let tags =  
@@ -881,7 +976,7 @@ let GetSelectCloze (nlpJsonOption: string option) (sentenceCountOption: int opti
                             | Some( acronym ) -> correctResponse + "|" + acronym // + if doTrace then "~" + (cl.trace |> String.concat "~") else ""
                             | None -> correctResponse //+ if doTrace then "~" + (cl.trace |> String.concat "~") else ""
 
-                        clozes.Add( { cloze=cloze; itemId = hash sa; clozeId = hash cloze; correctResponse = correctResponses; tags=tags} ) 
+                        clozes.Add( { cloze=cloze; clusterId = hash sa; itemId = hash cloze; correctResponse = correctResponses; tags=tags} ) 
                     )
                 )
             return Ok( {sentences=sentences.ToArray();clozes=clozes.ToArray()} )
@@ -914,7 +1009,8 @@ let GetSelectClozePercentage (percentage : float) ( stringArrayJsonOption : stri
             // let clozables = da |> GetClozables |> Array.map( fun ra -> ra.ToArray() )
             match clozeResult with
             | Ok(clozeAPI) ->
-                return Ok( clozeAPI )
+                let stimFile = clozeAPI |> PublicApiToStimFile //|> toJson
+                return Ok( stimFile)//clozeAPI)//stimFile )
             | Error(e) -> 
                 return Error(e)
         | Error(e) -> 
