@@ -169,7 +169,9 @@ let pojoToDictionary  (p:obj)  :System.Collections.Generic.Dictionary<string,obj
 [<Emit("Object.fromEntries($0)")>]
 let dictionaryToPojo  (p:System.Collections.Generic.Dictionary<string,obj>)  : obj= jsNative
 
-
+/// convert the public api to stim fil 2022
+/// This is bad design because we've already "rendered" the data as an API, but doing it this
+/// way encapsulates variability
 let PublicApiToStimFile (pa : ClozeAPI) =
     let stimFromClozableAPI (i:ClozableAPI) (display: string) response (addTags ) (deleteTags : string [])=
         // i.tags?stimulusId <- i.itemId
@@ -201,22 +203,25 @@ let PublicApiToStimFile (pa : ClozeAPI) =
             let stims = 
                 arr |> Array.collect(fun i -> 
                     let temp  = ResizeArray()
-                    //base cloze, remove transformation tags
-                    let cloze =  stimFromClozableAPI i i.cloze i.correctResponse [|("transformation","none")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
-                    temp.Add(cloze )
-                    //paraphrase if it exists; add indicator tag and remove other transformation tags
-                    if i.tags?clozeParaphraseTransformation <> null then
-                        let paraphrase =stimFromClozableAPI i i.tags?clozeParaphraseTransformation i.correctResponse [|("transformation","paraphrase")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
-                        temp.Add( paraphrase)
+                    // 6/1/22: Phil requests that if coref version exists, other versions be discarded
                     //coreference if it exists;  add indicator tag and remove other transformation tags
                     if i.tags?clozeCorefTransformation <> null then
                         let coref = stimFromClozableAPI i i.tags?clozeCorefTransformation i.tags?correctResponseCorefTransformation  [|("transformation","coreference")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
                         temp.Add( coref )
+                    else
+                        //base cloze, remove transformation tags
+                        let cloze =  stimFromClozableAPI i i.cloze i.correctResponse [|("transformation","none")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
+                        temp.Add(cloze )
+                        //paraphrase if it exists; add indicator tag and remove other transformation tags
+                        if i.tags?clozeParaphraseTransformation <> null then
+                            let paraphrase =stimFromClozableAPI i i.tags?clozeParaphraseTransformation i.correctResponse [|("transformation","paraphrase")|] [|"clozeCorefTransformation";"clozeParaphraseTransformation";"correctResponseCorefTransformation"|]
+                            temp.Add( paraphrase)
+                    
                     temp.ToArray()
                 )
             { stims = stims}
         )
-    //
+    // return current stim format
     {
         setspec = {
             clusters= clusterRecords

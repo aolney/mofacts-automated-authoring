@@ -124,7 +124,7 @@ type Msg =
 let init () : Model * Cmd<Msg> =
   ( { 
       Mode = UIMode.Simple
-      InputText = "Paste text here or leave blank and upload JSON respective JSON files."
+      InputText = "Paste text here or leave blank and upload respective JSON files."
       Service = SelectClozePercentage
       Status = ""
       JsonResult = ""

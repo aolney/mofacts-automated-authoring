@@ -210,3 +210,5 @@ node-build/
 
 mono_crash*
 *.zip
+*.json
+*.tsv
