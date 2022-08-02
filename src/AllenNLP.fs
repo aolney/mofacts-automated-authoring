@@ -507,6 +507,9 @@ let getRootOfSpan ( start : int) (stop : int) ( sa : SentenceAnnotation ) =
     let spanHeadIndex = spanHeads |> Array.findIndex( fun h -> h  < start || h  > stop ) 
     start + spanHeadIndex //offset
 
+let firstLetterLower (input : string) =
+    input.Substring(0,1).ToLower() + input.Substring(1)
+
 /// Get referent label that best represents coreferents in chain
 let resolveReferents ( da : DocumentAnnotation ) =
     //Map from cluster id to all sentences with that cluster
@@ -525,6 +528,10 @@ let resolveReferents ( da : DocumentAnnotation ) =
     //A span is pronominal if it starts with a PTB pronoun or a manual demonstrative pronoun
     let spanIsPronominal (sa : SentenceAnnotation ) ( span : int[] ) =
         sa.dep.pos.[  span.[0] ].StartsWith("PRP") ||
+        demonstrativeRegex.IsMatch( sa.dep.words.[  span.[0] ] )
+
+    let spanIsPronominalNotPossessive (sa : SentenceAnnotation ) ( span : int[] ) =
+        sa.dep.pos.[  span.[0] ] = "PRP" ||
         demonstrativeRegex.IsMatch( sa.dep.words.[  span.[0] ] )
 
     //We could try to "splice" a new sentence annotation using the original and resolved referent, but 
@@ -557,7 +564,12 @@ let resolveReferents ( da : DocumentAnnotation ) =
                             if spanIsPronominal da.sentences.[sentenceId] span then
                                 None
                             else
-                                Some(sentenceId, da.sentences.[sentenceId].dep.words.[ span.[0] .. span.[1] ] |> String.concat " " )
+                                let referent = da.sentences.[sentenceId].dep.words.[ span.[0] .. span.[1] ] |> String.concat " "
+                                //check if span started a sentence; if so lowercase
+                                if span.[0] = 0 then
+                                    Some(sentenceId, referent |> firstLetterLower )
+                                else
+                                    Some(sentenceId, referent )
                         )
                     //Return the earliest nominal referent for this chain as the resolved referent (this is OK for short chains, but for long chains with any error, does not work well)
                     //nominalReferents |> Array.tryHead
@@ -572,10 +584,14 @@ let resolveReferents ( da : DocumentAnnotation ) =
                     // | [||]-> None
                     // | x -> x |> Array.maxBy snd |> sprintf "%A" |> Some
 
+                    // Disallow resolution outside sentence if sentence contains a possible referent
+                    let referentInSentence = if nominalReferents |> Array.exists( fun (i,w) -> i = sa.id ) then true else false
+
                     // Return the closest preceeding referent (locality-sensitive resolution)
-                    match nominalReferents with
-                    | [||]-> None
-                    | x -> 
+                    match referentInSentence, nominalReferents with
+                    | _, [||]-> None
+                    | true, _ -> None
+                    | false, x -> 
                         match x |> Array.sortBy fst |> Array.tryFindBack( fun (i,w) -> i < sa.id ) with //Could allow equality in case best referent is already within the sentence, but this seems to introduce more errors than not
                         | None -> None
                         | Some(_,w) -> Some(w)
@@ -583,6 +599,8 @@ let resolveReferents ( da : DocumentAnnotation ) =
                 )
             // Transform the original sentence by splicing in these referents -> IFF span does not contain nominal AND referent is Some
             let indexedWords = sa.dep.words |> Array.copy 
+            // Set a flag so we only resolve one word in the sentence
+            let mutable notResolved = true
             for i = 0 to sa.cor.spans.Length - 1 do
                 // has noun is not enough; does not address cases like "this system"
                 // let spanHasNoun = sa.dep.pos.[  sa.cor.spans.[i].[0] ..  sa.cor.spans.[i].[1] ] |> Array.exists( fun pos -> pos.StartsWith("NN") )
@@ -592,7 +610,7 @@ let resolveReferents ( da : DocumentAnnotation ) =
 
                 let originalWords = sa.dep.words.[  sa.cor.spans.[i].[0] ..  sa.cor.spans.[i].[1] ] |> String.concat " "
                 // if we have a clusterReferent for this span
-                if spanIsPronominal sa sa.cor.spans.[i] && clusterReferents.[i].IsSome then
+                if spanIsPronominalNotPossessive sa sa.cor.spans.[i] && clusterReferents.[i].IsSome && notResolved then
                     // replace the first word of span with clusterReferent (which could be multiword)
                     indexedWords.[ sa.cor.spans.[i].[0] ] <- clusterReferents.[i].Value
                     //for debugging, see original + alternatives
@@ -600,6 +618,7 @@ let resolveReferents ( da : DocumentAnnotation ) =
                     // blank out the remaining words in the span
                     for j = sa.cor.spans.[i].[0] + 1 to sa.cor.spans.[i].[1] do //TODO check end inclusive
                         indexedWords.[ j ] <- ""
+                    notResolved <- false
                 // if there is no cluster referent, keep the original words
                 else
                     ()
