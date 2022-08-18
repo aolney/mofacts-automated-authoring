@@ -170,7 +170,7 @@ let GenerateFeedback incorrectAnswer correctAnswer =
         if feedback <> null then
             return Ok( {feedback = feedback } )
         else 
-            return Error( "Unable to generate definitional feedback from " + if definitionMap.IsEmpty then "empty cache." else "loaded cache." ) 
+            return Error( "Unable to generate definitional feedback from " + (if definitionMap.IsEmpty then "empty cache." else "loaded cache." ) )
     }
 
 /// This function should only be called by the test harness GUI. It wraps GenerateFeedback to match the test harness API

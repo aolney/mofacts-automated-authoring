@@ -68,7 +68,7 @@ let GenerateFeedback incorrectAnswer correctAnswer =
                 // let trace = Trace <| "Unable to generate feedback. Elaborated feedback cache is " + if cache.IsEmpty then "empty" else "full" + ". Definition feedback is " + if DefinitionalFeedback.definitionMap.IsEmpty then "empty." else "full."
                 // tags.Add(trace)
                 // return  Ok( {Feedback = null; Tags=tags.ToArray() } )
-                let message = "Unable to generate elaborated feedback from " + if cache.IsEmpty then "empty" else "loaded" + " cache. " + e
+                let message = "Unable to generate elaborated feedback from " + (if cache.IsEmpty then "empty" else "loaded" ) + " cache. " + e
                 return  Error( message )
     }
 
