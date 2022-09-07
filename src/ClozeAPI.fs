@@ -453,7 +453,8 @@ let GetClozables ( da : DocumentAnnotation ) =
             //update clozable record
             clozable.[i] <- { clozable.[i] with tags = tags |> Seq.toList }
 
-        clozable
+        //9/7/22 filter out clozables that are just "."
+        clozable |> Seq.filter( fun c -> c.words <> [|"."|] ) |> ResizeArray
     )
 
 ///To throw away sentences we don't know how to handle
