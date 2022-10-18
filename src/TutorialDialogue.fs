@@ -220,8 +220,14 @@ let GetDialogue (state:DialogueState) =
 
         // let resultsToType (resultsArr : Result<'t,'e>[] )  = resultsArr |> Array.choose( fun r -> match r with | Ok(r) -> Some(r) | Error(_) -> None ) 
         
+        let trim (s:string) = s.Trim()
+
         //The cloze in complete sentence form
-        let text = System.Text.RegularExpressions.Regex.Replace(state.ClozeItem, "(_ _|_)+", state.ClozeAnswer) //multi word cloze requires _ _ first
+        let text = 
+            //multi word cloze requires _ _ first
+            System.Text.RegularExpressions.Regex.Replace(state.ClozeItem, "(_ _|_)+", state.ClozeAnswer)
+            //if there is leading whitespace, later capitalization transforms will fail
+            |> trim
 
         //To make promises cleaner, pull them all here; can't use pattern matching without nested promises
         //Prepare for question generation by getting NLP; doing a no-op if not needed (TODO make cleaner?)
