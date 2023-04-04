@@ -154,7 +154,9 @@ type Configuration =
         UseAnswerCoreferenceFilter : bool;
         SyntheticQuestion : QuestionType;
     }
-    static member Default() = { UseCloze = true; UseGlossaryDefinitions = true; UseWikipediaDefinitionsForMissingGlossaryDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
+    //Defi_Y__Cloz_N__Keyf_N__Corf_N condition shown to be best in L@S evaluation
+    static member Default() = { UseCloze = false; UseGlossaryDefinitions = true; UseWikipediaDefinitionsForMissingGlossaryDefinitions = true; ElasticDocsContainBothKeys = false; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = false ; SyntheticQuestion = RelationshipQuestion}
+    // static member Default() = { UseCloze = true; UseGlossaryDefinitions = true; UseWikipediaDefinitionsForMissingGlossaryDefinitions = true; ElasticDocsContainBothKeys = true; MaxElasticDocs = 3; UseAnswerCoreferenceFilter = true ; SyntheticQuestion = RelationshipQuestion}
 
 /// Given a term, find the associated definitions in WikiTermEntityExtracts
 let getWikiDefinition (wikiExtracts: WikiTermEntityExtracts) ( term : string ) =

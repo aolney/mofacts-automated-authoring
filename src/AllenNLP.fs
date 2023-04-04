@@ -170,11 +170,11 @@ let endpoints =
         // Coreference = "http://141.225.12.235:8002/predict/coreference-resolution"
         // DependencyParser = "http://141.225.12.235:8002/predict/dependency-parsing"
         // SentenceSplitter = "http://141.225.12.235:8001/sents"
-        SRL = "https://allennlp.olney.ai/predict/semantic-role-labeling"
-        Coreference = "https://allennlp.olney.ai/predict/coreference-resolution"
-        DependencyParser = "https://allennlp.olney.ai/predict/dependency-parsing"
-        SentenceSplitter = "https://spacy.olney.ai/sents"
-        TextualEntailment = "https://allennlp.olney.ai/predict/textual-entailment"
+        SRL = "http://127.0.0.1:8002/predict/semantic-role-labeling"
+        Coreference = "http://127.0.0.1:8002/predict/coreference-resolution"
+        DependencyParser = "http://127.0.0.1:8002/predict/dependency-parsing"
+        SentenceSplitter = "http://127.0.0.1:8001/sents"
+        TextualEntailment = "http://127.0.0.1:8002/predict/textual-entailment"
         
     }
 

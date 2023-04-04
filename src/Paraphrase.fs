@@ -12,7 +12,7 @@ open Thoth.Fetch
 //for node compatibility
 importSideEffects "isomorphic-fetch"
 
-let paraphraseEndpoint = "https://paraphrase.olney.ai/api/"
+let paraphraseEndpoint = "http://127.0.0.1:8004/api" //"https://paraphrase.olney.ai/api/"
 
 /// Get a list of paraphrases (TODO: could update with optional n-best parameter (k : int option) )
 /// TODO: select the "best" paraphrase in terms of diversity, etc (may not be top-k result)

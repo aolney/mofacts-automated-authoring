@@ -55,7 +55,7 @@ type Wikification =
         entities : Entity[]
     }
 
-let endpoint = "http://127.0.0.1:8800/"
+let endpoint = "http://127.0.0.1:8003/"
 // let endpoint = "https://wikifier.olney.ai/"
 
 

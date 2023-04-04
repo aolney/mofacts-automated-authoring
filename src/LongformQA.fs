@@ -30,7 +30,7 @@ type AnswerDocuments =
 
 type Answer = { answer : string }
 
-let endpoint = "http://127.0.0.1:5000/api/"
+let endpoint = "http://127.0.0.1:8005/api/"
 // let endpoint = "https://longform-qa.olney.ai/api/"
 
 // NOTE: sometimes when we use anonymous records in the requests, they are rendered as empty payloads later, so we manually specify all requests
